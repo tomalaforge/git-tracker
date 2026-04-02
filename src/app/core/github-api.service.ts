@@ -1,0 +1,159 @@
+import { Injectable, inject } from '@angular/core';
+import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
+import { Observable } from 'rxjs';
+import {
+  GitHubUser,
+  PullRequest,
+  CheckRun,
+  WorkflowRun,
+  WorkflowJob,
+  CheckAnnotation,
+} from '../models';
+
+const API_BASE = 'https://api.github.com';
+
+@Injectable({ providedIn: 'root' })
+export class GitHubApiService {
+  private readonly http = inject(HttpClient);
+
+  getAuthenticatedUser(): Observable<GitHubUser> {
+    return this.http.get<GitHubUser>(`${API_BASE}/user`);
+  }
+
+  /**
+   * Search for open PRs authored by the given user.
+   */
+  searchUserPullRequests(username: string): Observable<{ items: PullRequest[] }> {
+    // We cast because the search endpoint returns issue-shaped objects
+    // but we enrich them later with full PR data
+    const q = `is:pr is:open author:${username}`;
+    const params = new HttpParams()
+      .set('q', q)
+      .set('sort', 'updated')
+      .set('order', 'desc')
+      .set('per_page', '100');
+    return this.http.get<{ items: PullRequest[] }>(`${API_BASE}/search/issues`, { params });
+  }
+
+  /**
+   * Get full PR data (with head SHA, base info, etc.)
+   */
+  getPullRequest(owner: string, repo: string, prNumber: number): Observable<PullRequest> {
+    return this.http.get<PullRequest>(
+      `${API_BASE}/repos/${owner}/${repo}/pulls/${prNumber}`,
+    );
+  }
+
+  /**
+   * Get check runs for a specific commit SHA.
+   */
+  getCheckRunsForRef(
+    owner: string,
+    repo: string,
+    ref: string,
+  ): Observable<{ total_count: number; check_runs: CheckRun[] }> {
+    const params = new HttpParams().set('per_page', '100');
+    return this.http.get<{ total_count: number; check_runs: CheckRun[] }>(
+      `${API_BASE}/repos/${owner}/${repo}/commits/${ref}/check-runs`,
+      { params },
+    );
+  }
+
+  /**
+   * Get workflow runs for a repo, optionally filtered by head SHA.
+   */
+  getWorkflowRuns(
+    owner: string,
+    repo: string,
+    headSha: string,
+  ): Observable<{ total_count: number; workflow_runs: WorkflowRun[] }> {
+    const params = new HttpParams().set('head_sha', headSha).set('per_page', '100');
+    return this.http.get<{ total_count: number; workflow_runs: WorkflowRun[] }>(
+      `${API_BASE}/repos/${owner}/${repo}/actions/runs`,
+      { params },
+    );
+  }
+
+  /**
+   * Get jobs for a specific workflow run.
+   */
+  getJobsForRun(
+    owner: string,
+    repo: string,
+    runId: number,
+  ): Observable<{ total_count: number; jobs: WorkflowJob[] }> {
+    const params = new HttpParams().set('per_page', '100').set('filter', 'latest');
+    return this.http.get<{ total_count: number; jobs: WorkflowJob[] }>(
+      `${API_BASE}/repos/${owner}/${repo}/actions/runs/${runId}/jobs`,
+      { params },
+    );
+  }
+
+  /**
+   * Get annotations for a check run (error messages).
+   */
+  getAnnotations(
+    owner: string,
+    repo: string,
+    checkRunId: number,
+  ): Observable<CheckAnnotation[]> {
+    return this.http.get<CheckAnnotation[]>(
+      `${API_BASE}/repos/${owner}/${repo}/check-runs/${checkRunId}/annotations`,
+    );
+  }
+
+  /**
+   * Download raw logs for a specific job (returns plain text).
+   */
+  getJobLogs(owner: string, repo: string, jobId: number): Observable<string> {
+    return this.http.get(
+      `${API_BASE}/repos/${owner}/${repo}/actions/jobs/${jobId}/logs`,
+      { responseType: 'text' },
+    );
+  }
+
+  /**
+   * Rerun only the failed jobs in a workflow run.
+   */
+  rerunFailedJobs(owner: string, repo: string, runId: number): Observable<void> {
+    return this.http.post<void>(
+      `${API_BASE}/repos/${owner}/${repo}/actions/runs/${runId}/rerun-failed-jobs`,
+      {},
+    );
+  }
+
+  /**
+   * Rerun entire workflow.
+   */
+  rerunWorkflow(owner: string, repo: string, runId: number): Observable<void> {
+    return this.http.post<void>(
+      `${API_BASE}/repos/${owner}/${repo}/actions/runs/${runId}/rerun`,
+      {},
+    );
+  }
+
+  /**
+   * Get reviews for a pull request.
+   */
+  getReviews(owner: string, repo: string, prNumber: number): Observable<any[]> {
+    return this.http.get<any[]>(`${API_BASE}/repos/${owner}/${repo}/pulls/${prNumber}/reviews`);
+  }
+
+  /**
+   * Merge a pull request.
+   */
+  mergePullRequest(owner: string, repo: string, prNumber: number): Observable<any> {
+    return this.http.put(`${API_BASE}/repos/${owner}/${repo}/pulls/${prNumber}/merge`, {});
+  }
+
+  /**
+   * Get rate limit status.
+   */
+  getRateLimit(): Observable<{
+    resources: { core: { remaining: number; limit: number; reset: number } };
+  }> {
+    return this.http.get<{
+      resources: { core: { remaining: number; limit: number; reset: number } };
+    }>(`${API_BASE}/rate_limit`);
+  }
+}

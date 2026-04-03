@@ -159,7 +159,32 @@ export class DashboardService {
       return updated;
     });
 
-    await this.loadCIStatusForIndex(index);
+    try {
+      const item = this._prList()[index];
+      const [owner, repo] = item.pr.base.repo.full_name.split('/');
+      const prNumber = item.pr.number;
+
+      // Reload PR metadata (vitals like Title, Body, Head SHA)
+      const updatedPr = await firstValueFrom(this.api.getPullRequest(owner, repo, prNumber));
+
+      this._prList.update((list) => {
+        const updated = [...list];
+        updated[index] = { ...updated[index], pr: updatedPr };
+        return updated;
+      });
+
+      // Reload Status (CI, Reviews, Discussions)
+      await this.loadCIStatusForIndex(index);
+    } catch (err: any) {
+      this._prList.update((list) => {
+        const updated = [...list];
+        updated[index] = { ...updated[index], isLoading: false };
+        return updated;
+      });
+      const msg = err?.error?.message || err?.message || 'Failed to reload PR.';
+      this._error.set(msg);
+    }
+
     this.updateRateLimit();
   }
 

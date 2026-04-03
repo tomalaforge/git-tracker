@@ -188,7 +188,7 @@ interface ReviewThread {
               </button>
               <!-- Reload this PR -->
               <button
-                (click)="reload.emit()"
+                (click)="triggerReload()"
                 class="p-1.5 rounded-lg bg-bg-glass border border-border-glass hover:border-border-hover
                        text-text-muted hover:text-text-primary transition-all cursor-pointer active:scale-95"
                 title="Reload CI status"
@@ -419,7 +419,7 @@ interface ReviewThread {
         } @else if (activeTab() === 'conversations') {
           <!-- Conversations tab -->
           <div class="flex flex-col h-full">
-            @if (isLoadingConversations()) {
+            @if (isLoadingConversations() && reviewThreads().length === 0 && prComments().length === 0) {
               <div class="p-6 space-y-3">
                 @for (i of [1, 2, 3]; track i) {
                   <div
@@ -677,7 +677,7 @@ interface ReviewThread {
             }
           </div>
         } @else {
-          @if (pr().isLoading) {
+          @if (pr().isLoading && pr().checkRuns.length === 0) {
             <!-- Loading state -->
             <div class="p-6 space-y-4">
               @for (i of [1, 2]; track i) {
@@ -1300,6 +1300,13 @@ export class PrDetailComponent {
       }
       this.lastPrId = currentPrId;
     });
+  }
+
+  async triggerReload(): Promise<void> {
+    this.reload.emit();
+    if (this.activeTab() === 'conversations') {
+      await this.loadConversations();
+    }
   }
 
   switchToConversations(): void {

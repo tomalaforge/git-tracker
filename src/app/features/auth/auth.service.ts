@@ -2,12 +2,14 @@ import { Injectable, signal, computed, inject } from '@angular/core';
 import { GitHubApiService } from '../../core';
 import { GitHubUser } from '../../models';
 import { firstValueFrom } from 'rxjs';
+import { Router } from '@angular/router';
 
 const TOKEN_KEY = 'gt_github_token';
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private readonly githubApi = inject(GitHubApiService);
+  private readonly router = inject(Router);
 
   private readonly _token = signal<string | null>(this.loadToken());
   private readonly _user = signal<GitHubUser | null>(null);
@@ -39,9 +41,7 @@ export class AuthService {
       this._isValidating.set(false);
       return true;
     } catch (err: any) {
-      this._token.set(null);
-      this._user.set(null);
-      this.clearToken();
+      this.logout();
       this._isValidating.set(false);
       this._error.set(err?.status === 401 ? 'Invalid token. Please check and try again.' : 'Connection failed. Please try again.');
       return false;
@@ -52,18 +52,26 @@ export class AuthService {
     this._token.set(null);
     this._user.set(null);
     this.clearToken();
+    this.router.navigate(['/login']);
   }
 
-  private async validateToken(): Promise<void> {
+  async validateToken(): Promise<void> {
     this._isValidating.set(true);
     try {
-      const user = await firstValueFrom(this.githubApi.getAuthenticatedUser());
+      // Timeout after 8 seconds to prevent permanent blocking
+      const userPromise = firstValueFrom(this.githubApi.getAuthenticatedUser());
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Validation timeout')), 10000)
+      );
+
+      const user = await Promise.race([userPromise, timeoutPromise]) as GitHubUser;
       this._user.set(user);
-    } catch {
-      this._token.set(null);
-      this.clearToken();
+    } catch (err: any) {
+      console.error('Validation failed', err);
+      this.logout();
+    } finally {
+      this._isValidating.set(false);
     }
-    this._isValidating.set(false);
   }
 
   private loadToken(): string | null {

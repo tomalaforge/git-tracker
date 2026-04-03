@@ -119,11 +119,15 @@ export interface PullRequestWithStatus {
   ciStatus: CIStatus;
   reviewStatus: ReviewStatus;
   isMergeable: boolean;
-  hasOpenDiscussions: boolean;
+  discussionStatus: 'NONE' | 'REPLIED' | 'NEW_CONTENT';
   checkRuns: CheckRun[];
   failedRuns: WorkflowRun[];
   failedJobs: WorkflowJobWithErrors[];
   isLoading: boolean;
+  isMerging?: boolean;
+  unseenDiscussions: boolean;
+  unseenApproval: boolean;
+  unseenCiFinish: boolean;
 }
 
 export interface WorkflowJobWithErrors {

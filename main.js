@@ -1,8 +1,9 @@
-const { app, BrowserWindow, shell } = require('electron');
+const { app, BrowserWindow, shell, ipcMain } = require('electron');
 const path = require('path');
 const url = require('url');
 
 let win;
+let appQuitting = false;
 
 function createWindow() {
   win = new BrowserWindow({
@@ -31,12 +32,17 @@ function createWindow() {
 
   // On macOS, hide the window instead of destroying it so the session is preserved
   win.on('close', (event) => {
-    if (process.platform === 'darwin') {
+    if (!appQuitting && process.platform === 'darwin') {
       event.preventDefault();
       win.hide();
     }
   });
 }
+
+// Track if the app is officially quitting (Cmd+Q or Menu)
+app.on('before-quit', () => {
+  appQuitting = true;
+});
 
 app.on('ready', createWindow);
 
@@ -47,9 +53,16 @@ app.on('window-all-closed', () => {
 });
 
 app.on('activate', () => {
-  if (win === null) {
-    createWindow();
-  } else {
+  if (win) {
     win.show();
+  } else {
+    createWindow();
+  }
+});
+
+// IPC handlers for badge support
+ipcMain.on('set-badge-count', (event, count) => {
+  if (process.platform === 'darwin') {
+    app.badgeCount = count;
   }
 });

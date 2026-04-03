@@ -1,4 +1,4 @@
-import { Injectable, inject, signal, computed } from '@angular/core';
+import { Injectable, inject, signal, computed, effect } from '@angular/core';
 import { GitHubApiService } from '../../core';
 import { CiStatusService } from '../ci-status';
 import { AuthService } from '../auth';
@@ -48,8 +48,32 @@ export class DashboardService {
   private refreshInterval: ReturnType<typeof setInterval> | null = null;
   private successRefreshInterval: ReturnType<typeof setInterval> | null = null;
 
+  constructor() {
+    effect(() => {
+      const list = this._prList();
+      const count = list.filter((p) => p.unseenDiscussions || p.unseenApproval || p.unseenCiFinish).length;
+      const electronAPI = (window as any).electronAPI;
+      if (electronAPI?.setBadgeCount) {
+        electronAPI.setBadgeCount(count);
+      }
+    });
+  }
+
   selectPr(prId: number): void {
     this._selectedPrId.set(prId);
+    // Clear notifications for this PR
+    this._prList.update((list) => {
+      const idx = list.findIndex((p) => p.pr.id === prId);
+      if (idx === -1) return list;
+      const updated = [...list];
+      updated[idx] = {
+        ...updated[idx],
+        unseenDiscussions: false,
+        unseenApproval: false,
+        unseenCiFinish: false,
+      };
+      return updated;
+    });
   }
 
   setFilterAuthor(author: string | null): void {
@@ -89,11 +113,15 @@ export class DashboardService {
             ciStatus: 'pending',
             reviewStatus: 'PENDING',
             isMergeable: false,
-            hasOpenDiscussions: false,
+            discussionStatus: 'NONE',
             checkRuns: [],
             failedRuns: [],
             failedJobs: [],
             isLoading: true,
+            isMerging: false,
+            unseenDiscussions: false,
+            unseenApproval: false,
+            unseenCiFinish: false,
           });
         } catch {
           // Skip PRs we can't access
@@ -139,19 +167,42 @@ export class DashboardService {
    * Merge a pull request.
    */
   async mergePr(prId: number): Promise<void> {
-    const index = this._prList().findIndex((p) => p.pr.id === prId);
-    if (index === -1) return;
+    const prIndex = this._prList().findIndex((p) => p.pr.id === prId);
+    if (prIndex === -1) return;
 
-    const item = this._prList()[index];
+    const item = this._prList()[prIndex];
     const [owner, repo] = item.pr.base.repo.full_name.split('/');
+
+    // Set isMerging = true
+    this._prList.update((list) => {
+      const updated = [...list];
+      updated[prIndex] = { ...updated[prIndex], isMerging: true };
+      return updated;
+    });
 
     try {
       await firstValueFrom(this.api.mergePullRequest(owner, repo, item.pr.number));
-      // Remove from list or refresh list
-      await this.loadPullRequests();
+
+      // Remove PR from list immediately
+      const remainingPrs = this._prList().filter((p) => p.pr.id !== prId);
+      this._prList.set(remainingPrs);
+
+      // If the merged PR was currently selected, select another one
+      if (this._selectedPrId() === prId) {
+        this._selectedPrId.set(remainingPrs.length > 0 ? remainingPrs[0].pr.id : null);
+      }
     } catch (err: any) {
       const msg = err?.error?.message || err?.message || 'Failed to merge pull request.';
       this._error.set(msg);
+
+      // Clear merging state on error
+      this._prList.update((list) => {
+        const currentIdx = list.findIndex((p) => p.pr.id === prId);
+        if (currentIdx === -1) return list;
+        const updated = [...list];
+        updated[currentIdx] = { ...updated[currentIdx], isMerging: false };
+        return updated;
+      });
     }
   }
 
@@ -200,21 +251,41 @@ export class DashboardService {
 
     try {
       const [owner, repo] = item.pr.base.repo.full_name.split('/');
-      const [reviews, discussionStatus] = await Promise.all([
+      const [reviews, discussionStatusData] = await Promise.all([
         firstValueFrom(this.api.getReviews(owner, repo, item.pr.number)),
         firstValueFrom(this.api.getPrDiscussionsStatus(owner, repo, item.pr.number)),
       ]);
-      const hasOpenDiscussions = discussionStatus.hasUnresolvedThreads;
-      const reviewStatus = this.computeReviewStatus(reviews, hasOpenDiscussions);
+
+      const oldItem = this._prList()[index];
+      const isSelected = this._selectedPrId() === oldItem.pr.id;
+
+      const newDiscussionStatus = this.computeDiscussionStatus(discussionStatusData.unresolvedThreads);
+      const hasOpenDiscussions = newDiscussionStatus !== 'NONE';
+      const newReviewStatus = this.computeReviewStatus(reviews, hasOpenDiscussions);
+
+      let unseenApproval = oldItem.unseenApproval;
+      let unseenDiscussions = oldItem.unseenDiscussions;
+
+      // Check for approval change
+      if (oldItem.reviewStatus !== 'APPROVED' && newReviewStatus === 'APPROVED') {
+        if (!isSelected) unseenApproval = true;
+      }
+
+      // Check for new discussions
+      if (oldItem.discussionStatus !== 'NEW_CONTENT' && newDiscussionStatus === 'NEW_CONTENT') {
+        if (!isSelected) unseenDiscussions = true;
+      }
 
       this._prList.update((list) => {
         const updated = [...list];
         updated[index] = {
           ...updated[index],
-          reviewStatus,
-          hasOpenDiscussions,
+          reviewStatus: newReviewStatus,
+          discussionStatus: newDiscussionStatus,
+          unseenApproval,
+          unseenDiscussions,
           isMergeable:
-            updated[index].ciStatus === 'success' && reviewStatus === 'APPROVED' && !item.pr.draft,
+            updated[index].ciStatus === 'success' && newReviewStatus === 'APPROVED' && !item.pr.draft,
         };
         return updated;
       });
@@ -315,20 +386,43 @@ export class DashboardService {
       const repoFullName = item.pr.base.repo.full_name;
       const [owner, repo] = repoFullName.split('/');
 
-      const [checkRuns, reviews, discussionStatus] = await Promise.all([
+      const [checkRuns, reviews, discussionStatusData] = await Promise.all([
         this.ciService.loadCheckRuns(item.pr),
         firstValueFrom(this.api.getReviews(owner, repo, item.pr.number)),
         firstValueFrom(this.api.getPrDiscussionsStatus(owner, repo, item.pr.number)),
       ]);
 
-      const ciStatus = this.ciService.computeCIStatus(checkRuns);
-      const hasOpenDiscussions = discussionStatus.hasUnresolvedThreads;
-      const reviewStatus = this.computeReviewStatus(reviews, hasOpenDiscussions);
+      const oldItem = this._prList()[index];
+      const isSelected = this._selectedPrId() === oldItem.pr.id;
+
+      const newCiStatus = this.ciService.computeCIStatus(checkRuns);
+      const newDiscussionStatus = this.computeDiscussionStatus(discussionStatusData.unresolvedThreads);
+      const hasOpenDiscussions = newDiscussionStatus !== 'NONE';
+      const newReviewStatus = this.computeReviewStatus(reviews, hasOpenDiscussions);
+
+      let unseenCiFinish = oldItem.unseenCiFinish;
+      let unseenApproval = oldItem.unseenApproval;
+      let unseenDiscussions = oldItem.unseenDiscussions;
+
+      // Check for CI change
+      if (oldItem.ciStatus === 'pending' && (newCiStatus === 'success' || newCiStatus === 'failure')) {
+        if (!isSelected) unseenCiFinish = true;
+      }
+
+      // Check for approval change
+      if (oldItem.reviewStatus !== 'APPROVED' && newReviewStatus === 'APPROVED') {
+        if (!isSelected) unseenApproval = true;
+      }
+
+      // Check for new discussions
+      if (oldItem.discussionStatus !== 'NEW_CONTENT' && newDiscussionStatus === 'NEW_CONTENT') {
+        if (!isSelected) unseenDiscussions = true;
+      }
 
       let failedRuns = item.failedRuns;
       let failedJobs = item.failedJobs;
 
-      if (ciStatus === 'failure') {
+      if (newCiStatus === 'failure') {
         failedRuns = await this.ciService.loadFailedWorkflowRuns(item.pr);
         failedJobs = await this.ciService.loadFailedJobsWithErrors(item.pr, failedRuns);
       }
@@ -338,10 +432,13 @@ export class DashboardService {
         updated[index] = {
           ...updated[index],
           checkRuns,
-          ciStatus,
-          reviewStatus,
-          hasOpenDiscussions,
-          isMergeable: ciStatus === 'success' && reviewStatus === 'APPROVED' && !item.pr.draft,
+          ciStatus: newCiStatus,
+          reviewStatus: newReviewStatus,
+          discussionStatus: newDiscussionStatus,
+          unseenCiFinish,
+          unseenApproval,
+          unseenDiscussions,
+          isMergeable: newCiStatus === 'success' && newReviewStatus === 'APPROVED' && !item.pr.draft,
           failedRuns,
           failedJobs,
           isLoading: false,
@@ -355,6 +452,17 @@ export class DashboardService {
         return updated;
       });
     }
+  }
+
+  private computeDiscussionStatus(
+    unresolvedThreads: Array<{ isResolved: boolean; lastCommentAuthor: string }>,
+  ): 'NONE' | 'REPLIED' | 'NEW_CONTENT' {
+    const unresolved = unresolvedThreads.filter((t) => !t.isResolved);
+    if (unresolved.length === 0) return 'NONE';
+
+    const myLogin = this.auth.user()?.login;
+    const hasUnreplied = unresolved.some((t) => t.lastCommentAuthor !== myLogin);
+    return hasUnreplied ? 'NEW_CONTENT' : 'REPLIED';
   }
 
   async updatePrMetadata(prId: number, title: string, body: string): Promise<void> {

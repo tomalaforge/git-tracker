@@ -125,19 +125,67 @@ interface ReviewThread {
               @if (pr().isMergeable) {
                 <button
                   (click)="merge.emit()"
-                  class="px-3 py-1.5 text-[11px] font-bold bg-success text-white rounded-lg hover:bg-success/90 transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 shadow-lg shadow-success/20"
+                  [disabled]="pr().isMerging"
+                  class="px-3 py-1.5 text-[11px] font-bold bg-success text-white rounded-lg hover:bg-success/90 transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 shadow-lg shadow-success/20 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
+                  @if (pr().isMerging) {
+                    <svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle
+                        class="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        stroke-width="4"
+                      ></circle>
+                      <path
+                        class="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                      ></path>
+                    </svg>
+                    Merging…
+                  } @else {
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M8 7v8a2 2 0 002 2h3m0 0a2 2 0 002-2v-3m-2 2l-3-3m3 3l3-3"
+                      />
+                    </svg>
+                    Merge
+                  }
+                </button>
+              }
+              <!-- Add Reviewers -->
+              <button
+                (click)="addReviewers()"
+                class="px-2.5 py-1.5 rounded-lg bg-bg-glass border border-border-glass hover:border-border-hover
+                       text-text-muted hover:text-accent transition-all cursor-pointer active:scale-95 
+                       flex items-center gap-1.5 text-[11px] font-medium"
+                [disabled]="isAddingReviewers()"
+                [title]="'Add Betrozov, Mathieu-JJ and MaximeSohetRosa as reviewers'"
+              >
+                @if (reviewersAdded()) {
+                  <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                    <path
+                      fill-rule="evenodd"
+                      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                      clip-rule="evenodd"
+                    />
+                  </svg>
+                } @else {
                   <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path
                       stroke-linecap="round"
                       stroke-linejoin="round"
                       stroke-width="2"
-                      d="M8 7v8a2 2 0 002 2h3m0 0a2 2 0 002-2v-3m-2 2l-3-3m3 3l3-3"
+                      d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"
                     />
                   </svg>
-                  Merge PR
-                </button>
-              }
+                }
+              </button>
               <!-- Reload this PR -->
               <button
                 (click)="reload.emit()"
@@ -186,6 +234,29 @@ interface ReviewThread {
                   </svg>
                 }
               </button>
+              <!-- Copy Slack message -->
+              <button
+                (click)="copySlackMessage()"
+                class="p-1.5 rounded-lg bg-bg-glass border border-border-glass hover:border-border-hover
+                       text-text-muted hover:text-[#4A154B] transition-all cursor-pointer active:scale-95"
+                [title]="slackCopied() ? 'Copied formula!' : 'Copy Slack review request'"
+              >
+                @if (slackCopied()) {
+                  <svg class="w-3.5 h-3.5 text-success" fill="currentColor" viewBox="0 0 20 20">
+                    <path
+                      fill-rule="evenodd"
+                      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                      clip-rule="evenodd"
+                    />
+                  </svg>
+                } @else {
+                  <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                    <path
+                      d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523 2.528 2.528 0 0 1-2.522-2.523 2.528 2.528 0 0 1 2.522-2.52h2.52v2.52zM6.313 15.165a2.528 2.528 0 0 1 2.521-2.52 2.528 2.528 0 0 1 2.521 2.52v6.313a2.528 2.528 0 0 1-2.521 2.521 2.528 2.528 0 0 1-2.521-2.521v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52 2.528 2.528 0 0 1 2.521-2.522 2.528 2.528 0 0 1 2.52 2.522v2.52h-2.52zM8.834 6.313a2.528 2.528 0 0 1 2.52 2.521 2.528 2.528 0 0 1-2.52 2.521H2.521A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.521-2.521h6.313zM18.958 8.834a2.528 2.528 0 0 1 2.522-2.521 2.528 2.528 0 0 1 2.52 2.521 2.528 2.528 0 0 1-2.52 2.52h-2.522v-2.52zM17.687 8.834a2.528 2.528 0 0 1-2.52-2.521 2.528 2.528 0 0 1-2.521-2.521V0a2.528 2.528 0 0 1 2.521-2.521 2.528 2.528 0 0 1 2.521 2.521v6.313zM15.165 18.958a2.528 2.528 0 0 1 2.521 2.522 2.528 2.528 0 0 1-2.521 2.52 2.528 2.528 0 0 1-2.521-2.52v-2.522h2.521zM15.165 17.687a2.528 2.528 0 0 1-2.521-2.52 2.528 2.528 0 0 1 2.521-2.521h6.313a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521h-6.313z"
+                    />
+                  </svg>
+                }
+              </button>
               <!-- Link to GitHub -->
               <a
                 [href]="pr().pr.html_url"
@@ -229,8 +300,23 @@ interface ReviewThread {
           [class.hover:text-text-primary]="activeTab() !== 'conversations'"
         >
           Conversations
-          @if (pr().hasOpenDiscussions) {
-            <span class="w-2 h-2 rounded-full bg-accent animate-pulse shadow-[0_0_8px_rgba(var(--accent-rgb),0.6)]" title="Unresolved conversations"></span>
+          @if (pr().discussionStatus !== 'NONE') {
+            <span
+              class="w-2 h-2 rounded-full shadow-[0_0_8px_rgba(0,0,0,0.3)]"
+              [class.bg-accent]="
+                pr().discussionStatus === 'REPLIED' && activeTab() !== 'conversations'
+              "
+              [class.bg-white]="
+                pr().discussionStatus === 'REPLIED' && activeTab() === 'conversations'
+              "
+              [class.bg-danger]="pr().discussionStatus === 'NEW_CONTENT'"
+              [class.animate-pulse]="pr().discussionStatus === 'NEW_CONTENT'"
+              [title]="
+                pr().discussionStatus === 'NEW_CONTENT'
+                  ? 'New comments / Needs reply'
+                  : 'Unresolved threads'
+              "
+            ></span>
           }
           @if (totalComments() > 0) {
             <span
@@ -1146,6 +1232,9 @@ export class PrDetailComponent {
   readonly prDetailsUpdated = output<{ title: string; body: string }>();
 
   readonly copied = signal(false);
+  readonly slackCopied = signal(false);
+  readonly reviewersAdded = signal(false);
+  readonly isAddingReviewers = signal(false);
   readonly activeTab = signal<'ci' | 'conversations' | 'details'>('ci');
 
   // Conversations state
@@ -1303,6 +1392,33 @@ export class PrDetailComponent {
       this.copied.set(true);
       setTimeout(() => this.copied.set(false), 2000);
     });
+  }
+
+  copySlackMessage(): void {
+    const text = `can you please review this PR: ${this.pr().pr.html_url} ?`;
+    navigator.clipboard.writeText(text).then(() => {
+      this.slackCopied.set(true);
+      setTimeout(() => this.slackCopied.set(false), 2000);
+    });
+  }
+
+  async addReviewers(): Promise<void> {
+    const { base, number } = this.pr().pr;
+    const owner = base.repo.owner.login;
+    const repo = base.repo.name;
+    const reviewers = ['Betrozov', 'Mathieu-JJ', 'MaximeSohetRosa'];
+
+    this.isAddingReviewers.set(true);
+    try {
+      await firstValueFrom(this.api.requestReviewers(owner, repo, number, reviewers));
+      this.reviewersAdded.set(true);
+      setTimeout(() => this.reviewersAdded.set(false), 2000);
+      this.reload.emit();
+    } catch (error) {
+      console.error('Failed to add reviewers', error);
+    } finally {
+      this.isAddingReviewers.set(false);
+    }
   }
 
   groupBySuite(

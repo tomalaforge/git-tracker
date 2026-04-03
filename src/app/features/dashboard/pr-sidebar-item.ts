@@ -10,11 +10,17 @@ import { CiBadgeComponent } from '../ci-status/ci-badge';
   template: `
     <button
       (click)="select.emit()"
-      class="w-full text-left px-4 py-3 border-b border-border-glass transition-all duration-150 cursor-pointer
+      class="relative w-full text-left px-4 py-3 border-b border-border-glass transition-all duration-150 cursor-pointer
              hover:bg-bg-card-hover group"
       [class.bg-bg-card]="isSelected()"
       [class.border-l-2]="isSelected()"
       [class.border-l-accent]="isSelected()">
+      
+      <!-- Unread indicator -->
+      @if (prData().unseenDiscussions || prData().unseenApproval || prData().unseenCiFinish) {
+        <div class="absolute top-2 right-2 w-2 h-2 rounded-full bg-accent shadow-[0_0_8px_rgba(var(--accent-rgb),0.6)]"></div>
+      }
+
       <div class="flex items-start justify-between gap-2">
         <div class="min-w-0 flex-1">
           <div class="flex items-center gap-2 mb-0.5">
@@ -54,8 +60,14 @@ import { CiBadgeComponent } from '../ci-status/ci-badge';
                 </div>
 
                 <!-- Unresolved Discussions Icon -->
-                @if (prData().hasOpenDiscussions) {
-                  <div title="Unresolved Discussions" class="text-accent flex-shrink-0">
+                @if (prData().discussionStatus !== 'NONE') {
+                  <div 
+                    [title]="prData().discussionStatus === 'NEW_CONTENT' ? 'New comments / Needs reply' : 'Unresolved Discussions'" 
+                    class="flex-shrink-0"
+                    [class.text-accent]="prData().discussionStatus === 'REPLIED'"
+                    [class.text-danger]="prData().discussionStatus === 'NEW_CONTENT'"
+                    [class.animate-pulse-slow]="prData().discussionStatus === 'NEW_CONTENT'"
+                  >
                     <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                       <path fill-rule="evenodd" d="M18 10c0 3.866-3.582 7-8 7a8.841 8.841 0 01-4.083-.98L2 17l1.338-3.123C2.493 12.767 2 11.434 2 10c0-3.866 3.582-7 8-7s8 3.134 8 7zM7 9H5v2h2V9zm8 0h-2v2h2V9zm-4 0H9v2h2V9z" clip-rule="evenodd" />
                     </svg>

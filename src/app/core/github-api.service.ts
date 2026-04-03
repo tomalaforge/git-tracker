@@ -145,8 +145,15 @@ export class GitHubApiService {
   /**
    * Merge a pull request.
    */
-  mergePullRequest(owner: string, repo: string, prNumber: number): Observable<any> {
-    return this.http.put(`${API_BASE}/repos/${owner}/${repo}/pulls/${prNumber}/merge`, {});
+  mergePullRequest(
+    owner: string,
+    repo: string,
+    prNumber: number,
+    mergeMethod: 'merge' | 'squash' | 'rebase' = 'squash',
+  ): Observable<any> {
+    return this.http.put(`${API_BASE}/repos/${owner}/${repo}/pulls/${prNumber}/merge`, {
+      merge_method: mergeMethod,
+    });
   }
 
   /**
@@ -214,6 +221,21 @@ export class GitHubApiService {
   }
 
   /**
+   * Request reviewers for a pull request.
+   */
+  requestReviewers(
+    owner: string,
+    repo: string,
+    prNumber: number,
+    reviewers: string[],
+  ): Observable<void> {
+    return this.http.post<void>(
+      `${API_BASE}/repos/${owner}/${repo}/pulls/${prNumber}/requested_reviewers`,
+      { reviewers },
+    );
+  }
+
+  /**
    * Get rate limit status.
    */
   getRateLimit(): Observable<{
@@ -231,7 +253,10 @@ export class GitHubApiService {
     owner: string,
     repo: string,
     number: number,
-  ): Observable<{ hasUnresolvedThreads: boolean; totalThreads: number }> {
+  ): Observable<{
+    totalThreads: number;
+    unresolvedThreads: Array<{ isResolved: boolean; lastCommentAuthor: string }>;
+  }> {
     const query = `
       query($owner: String!, $repo: String!, $number: Int!) {
         repository(owner: $owner, name: $repo) {
@@ -240,6 +265,13 @@ export class GitHubApiService {
               totalCount
               nodes {
                 isResolved
+                comments(last: 1) {
+                  nodes {
+                    author {
+                      login
+                    }
+                  }
+                }
               }
             }
           }
@@ -253,8 +285,11 @@ export class GitHubApiService {
           const pr = res?.data?.repository?.pullRequest;
           const threads = pr?.reviewThreads?.nodes || [];
           const totalThreads = pr?.reviewThreads?.totalCount || 0;
-          const hasUnresolvedThreads = threads.some((t: any) => !t.isResolved);
-          return { hasUnresolvedThreads, totalThreads };
+          const unresolvedThreads = threads.map((t: any) => ({
+            isResolved: t.isResolved,
+            lastCommentAuthor: t.comments?.nodes?.[0]?.author?.login || '',
+          }));
+          return { totalThreads, unresolvedThreads };
         }),
       );
   }

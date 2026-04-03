@@ -315,19 +315,34 @@ interface ReviewThread {
 
               <!-- New general comment box -->
               <div class="shrink-0 border-t border-border-glass p-4 bg-bg-primary/30">
-                <textarea
-                  [(ngModel)]="newCommentText"
-                  placeholder="Leave a comment…"
-                  rows="3"
-                  class="w-full text-xs bg-bg-primary border border-border-glass rounded-lg px-3 py-2 text-text-primary placeholder-text-muted resize-none focus:outline-none focus:border-accent transition-colors mb-2"></textarea>
-                <div class="flex justify-end">
-                  <button
-                    (click)="submitComment()"
-                    [disabled]="isSubmitting() || !newCommentText.trim()"
-                    class="px-4 py-1.5 text-xs font-medium bg-accent text-white rounded-lg hover:bg-accent/90 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
-                    {{ isSubmitting() ? 'Sending…' : 'Comment' }}
-                  </button>
-                </div>
+                @if (!showCommentBox) {
+                  <div class="flex justify-end">
+                    <button
+                      (click)="showCommentBox = true"
+                      class="px-4 py-1.5 text-xs font-medium border border-border-glass text-text-secondary rounded-lg hover:bg-bg-secondary transition-all cursor-pointer">
+                      Add a comment
+                    </button>
+                  </div>
+                } @else {
+                  <textarea
+                    [(ngModel)]="newCommentText"
+                    placeholder="Leave a comment…"
+                    rows="3"
+                    class="w-full text-xs bg-bg-primary border border-border-glass rounded-lg px-3 py-2 text-text-primary placeholder-text-muted resize-none focus:outline-none focus:border-accent transition-colors mb-2"></textarea>
+                  <div class="flex justify-end gap-2">
+                    <button
+                      (click)="showCommentBox = false; newCommentText = ''"
+                      class="px-4 py-1.5 text-xs font-medium border border-border-glass text-text-secondary rounded-lg hover:bg-bg-secondary transition-all cursor-pointer">
+                      Cancel
+                    </button>
+                    <button
+                      (click)="submitComment()"
+                      [disabled]="isSubmitting() || !newCommentText.trim()"
+                      class="px-4 py-1.5 text-xs font-medium bg-accent text-white rounded-lg hover:bg-accent/90 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+                      {{ isSubmitting() ? 'Sending…' : 'Comment' }}
+                    </button>
+                  </div>
+                }
               </div>
             }
           </div>
@@ -683,6 +698,7 @@ export class PrDetailComponent {
 
   replyText = '';
   newCommentText = '';
+  showCommentBox = false;
 
   private conversationsLoaded = false;
 
@@ -778,6 +794,7 @@ export class PrDetailComponent {
       );
       this.prComments.update(list => [...list, newComment]);
       this.newCommentText = '';
+      this.showCommentBox = false;
     } finally {
       this.isSubmitting.set(false);
     }

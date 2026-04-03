@@ -1,12 +1,23 @@
-import { Component, input, output, computed, signal } from '@angular/core';
+import { Component, input, output, computed, signal, inject, effect } from '@angular/core';
 import { DatePipe } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { PullRequestWithStatus, WorkflowJobWithErrors, CheckAnnotation, ParsedTestFailure } from '../../models';
 import { CiBadgeComponent } from '../ci-status/ci-badge';
+import { GitHubApiService } from '../../core';
+import { firstValueFrom } from 'rxjs';
+
+interface ReviewThread {
+  rootId: number;
+  path: string;
+  line: number | null;
+  diffHunk: string | null;
+  comments: any[];
+}
 
 @Component({
   selector: 'gt-pr-detail',
   standalone: true,
-  imports: [CiBadgeComponent, DatePipe],
+  imports: [CiBadgeComponent, DatePipe, FormsModule],
   template: `
     <div class="h-full flex flex-col">
       <!-- PR header -->
@@ -127,8 +138,201 @@ import { CiBadgeComponent } from '../ci-status/ci-badge';
         </div>
       </div>
 
+      <!-- Tab bar -->
+      <div class="shrink-0 flex border-b border-border-glass bg-bg-primary/30">
+        <button
+          (click)="activeTab.set('ci')"
+          class="px-5 py-2.5 text-xs font-medium transition-colors cursor-pointer border-b-2"
+          [class.border-accent]="activeTab() === 'ci'"
+          [class.text-accent]="activeTab() === 'ci'"
+          [class.border-transparent]="activeTab() !== 'ci'"
+          [class.text-text-muted]="activeTab() !== 'ci'"
+          [class.hover:text-text-primary]="activeTab() !== 'ci'">
+          CI
+        </button>
+        <button
+          (click)="switchToConversations()"
+          class="px-5 py-2.5 text-xs font-medium transition-colors cursor-pointer border-b-2 flex items-center gap-1.5"
+          [class.border-accent]="activeTab() === 'conversations'"
+          [class.text-accent]="activeTab() === 'conversations'"
+          [class.border-transparent]="activeTab() !== 'conversations'"
+          [class.text-text-muted]="activeTab() !== 'conversations'"
+          [class.hover:text-text-primary]="activeTab() !== 'conversations'">
+          Conversations
+          @if (totalComments() > 0) {
+            <span class="px-1.5 py-0.5 rounded-full text-[10px] font-semibold"
+              [class.bg-accent]="activeTab() === 'conversations'"
+              [class.text-white]="activeTab() === 'conversations'"
+              [class.bg-bg-glass]="activeTab() !== 'conversations'"
+              [class.text-text-muted]="activeTab() !== 'conversations'">
+              {{ totalComments() }}
+            </span>
+          }
+        </button>
+      </div>
+
       <!-- Content area - scrollable -->
       <div class="flex-1 overflow-y-auto">
+        @if (activeTab() === 'conversations') {
+          <!-- Conversations tab -->
+          <div class="flex flex-col h-full">
+            @if (isLoadingConversations()) {
+              <div class="p-6 space-y-3">
+                @for (i of [1,2,3]; track i) {
+                  <div class="bg-bg-glass border border-border-glass rounded-xl p-4 animate-pulse-slow">
+                    <div class="h-3 bg-bg-card rounded w-1/4 mb-3"></div>
+                    <div class="h-3 bg-bg-card rounded w-3/4 mb-2"></div>
+                    <div class="h-3 bg-bg-card rounded w-1/2"></div>
+                  </div>
+                }
+              </div>
+            } @else {
+              <div class="flex-1 overflow-y-auto p-4 space-y-6">
+
+                <!-- Review comment threads grouped by file -->
+                @if (reviewThreads().length > 0) {
+                  <div>
+                    <p class="text-[10px] text-text-muted font-semibold uppercase tracking-wider mb-3">
+                      Review Comments ({{ reviewComments().length }})
+                    </p>
+                    <div class="space-y-4">
+                      @for (thread of reviewThreads(); track thread.rootId) {
+                        <div class="bg-bg-glass border border-border-glass rounded-xl overflow-hidden">
+                          <!-- File path header -->
+                          <div class="flex items-center justify-between px-3 py-2 bg-bg-primary/50 border-b border-border-glass">
+                            <div class="flex items-center gap-2 min-w-0">
+                              <svg class="w-3.5 h-3.5 text-text-muted shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clip-rule="evenodd" />
+                              </svg>
+                              <span class="text-[11px] font-mono text-text-secondary truncate">{{ thread.path }}</span>
+                              @if (thread.line) {
+                                <span class="text-[10px] text-text-muted shrink-0">:{{ thread.line }}</span>
+                              }
+                            </div>
+                            <button
+                              (click)="copyFileName(thread.path)"
+                              class="p-1 rounded text-text-muted hover:text-accent transition-colors cursor-pointer shrink-0"
+                              [title]="copiedFileName() === thread.path ? 'Copied!' : 'Copy filename'">
+                              @if (copiedFileName() === thread.path) {
+                                <svg class="w-3.5 h-3.5 text-success" fill="currentColor" viewBox="0 0 20 20">
+                                  <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
+                                </svg>
+                              } @else {
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2" />
+                                </svg>
+                              }
+                            </button>
+                          </div>
+                          <!-- Diff hunk -->
+                          @if (thread.diffHunk) {
+                            <pre class="px-3 py-2 text-[10px] font-mono text-text-muted bg-bg-primary/30 border-b border-border-glass overflow-x-auto whitespace-pre leading-relaxed max-h-28 overflow-y-auto">{{ thread.diffHunk }}</pre>
+                          }
+                          <!-- Comments in thread -->
+                          <div class="divide-y divide-border-glass">
+                            @for (comment of thread.comments; track comment.id) {
+                              <div class="px-3 py-3">
+                                <div class="flex items-center gap-2 mb-1.5">
+                                  <img [src]="comment.user.avatar_url" [alt]="comment.user.login"
+                                    class="w-5 h-5 rounded-full shrink-0" />
+                                  <span class="text-xs font-semibold text-text-primary">{{ comment.user.login }}</span>
+                                  <span class="text-[10px] text-text-muted ml-auto">{{ comment.created_at | date:'MMM d, HH:mm' }}</span>
+                                </div>
+                                <div class="text-xs text-text-secondary leading-relaxed whitespace-pre-wrap pl-7">{{ comment.body }}</div>
+                              </div>
+                            }
+                          </div>
+                          <!-- Reply to thread -->
+                          @if (replyingTo() === thread.rootId) {
+                            <div class="p-3 border-t border-border-glass bg-bg-primary/20">
+                              <textarea
+                                [(ngModel)]="replyText"
+                                placeholder="Write a reply…"
+                                rows="3"
+                                class="w-full text-xs bg-bg-primary border border-border-glass rounded-lg px-3 py-2 text-text-primary placeholder-text-muted resize-none focus:outline-none focus:border-accent transition-colors"></textarea>
+                              <div class="flex justify-end gap-2 mt-2">
+                                <button
+                                  (click)="replyingTo.set(null)"
+                                  class="px-3 py-1 text-xs text-text-muted hover:text-text-primary transition-colors cursor-pointer">
+                                  Cancel
+                                </button>
+                                <button
+                                  (click)="submitReply(thread.rootId, thread.path)"
+                                  [disabled]="isSubmitting()"
+                                  class="px-3 py-1 text-xs font-medium bg-accent text-white rounded-lg hover:bg-accent/90 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+                                  {{ isSubmitting() ? 'Sending…' : 'Reply' }}
+                                </button>
+                              </div>
+                            </div>
+                          } @else {
+                            <div class="px-3 py-2 border-t border-border-glass">
+                              <button
+                                (click)="replyingTo.set(thread.rootId)"
+                                class="text-[11px] text-text-muted hover:text-accent transition-colors cursor-pointer">
+                                ↩ Reply
+                              </button>
+                            </div>
+                          }
+                        </div>
+                      }
+                    </div>
+                  </div>
+                }
+
+                <!-- General PR comments -->
+                @if (prComments().length > 0) {
+                  <div>
+                    <p class="text-[10px] text-text-muted font-semibold uppercase tracking-wider mb-3">
+                      Discussion ({{ prComments().length }})
+                    </p>
+                    <div class="space-y-2">
+                      @for (comment of prComments(); track comment.id) {
+                        <div class="bg-bg-glass border border-border-glass rounded-xl px-4 py-3">
+                          <div class="flex items-center gap-2 mb-1.5">
+                            <img [src]="comment.user.avatar_url" [alt]="comment.user.login"
+                              class="w-5 h-5 rounded-full shrink-0" />
+                            <span class="text-xs font-semibold text-text-primary">{{ comment.user.login }}</span>
+                            <span class="text-[10px] text-text-muted ml-auto">{{ comment.created_at | date:'MMM d, HH:mm' }}</span>
+                          </div>
+                          <div class="text-xs text-text-secondary leading-relaxed whitespace-pre-wrap pl-7">{{ comment.body }}</div>
+                        </div>
+                      }
+                    </div>
+                  </div>
+                }
+
+                @if (reviewThreads().length === 0 && prComments().length === 0) {
+                  <div class="text-center py-16">
+                    <div class="inline-flex items-center justify-center w-12 h-12 rounded-full bg-bg-glass border border-border-glass mb-3">
+                      <svg class="w-5 h-5 text-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                      </svg>
+                    </div>
+                    <p class="text-sm text-text-muted">No conversations yet</p>
+                  </div>
+                }
+              </div>
+
+              <!-- New general comment box -->
+              <div class="shrink-0 border-t border-border-glass p-4 bg-bg-primary/30">
+                <textarea
+                  [(ngModel)]="newCommentText"
+                  placeholder="Leave a comment…"
+                  rows="3"
+                  class="w-full text-xs bg-bg-primary border border-border-glass rounded-lg px-3 py-2 text-text-primary placeholder-text-muted resize-none focus:outline-none focus:border-accent transition-colors mb-2"></textarea>
+                <div class="flex justify-end">
+                  <button
+                    (click)="submitComment()"
+                    [disabled]="isSubmitting() || !newCommentText.trim()"
+                    class="px-4 py-1.5 text-xs font-medium bg-accent text-white rounded-lg hover:bg-accent/90 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+                    {{ isSubmitting() ? 'Sending…' : 'Comment' }}
+                  </button>
+                </div>
+              </div>
+            }
+          </div>
+        } @else {
+
         @if (pr().isLoading) {
           <!-- Loading state -->
           <div class="p-6 space-y-4">
@@ -449,11 +653,15 @@ import { CiBadgeComponent } from '../ci-status/ci-badge';
             <p class="text-sm text-text-muted">This repository may not use GitHub Actions, or checks haven't been registered yet.</p>
           </div>
         }
+
+        } <!-- end @else (ci tab) -->
       </div>
     </div>
   `,
 })
 export class PrDetailComponent {
+  private readonly api = inject(GitHubApiService);
+
   readonly pr = input.required<PullRequestWithStatus>();
 
   readonly reload = output<void>();
@@ -463,12 +671,124 @@ export class PrDetailComponent {
   readonly rerunJob = output<{ runId: number; repoFullName: string }>();
 
   readonly copied = signal(false);
+  readonly activeTab = signal<'ci' | 'conversations'>('ci');
+
+  // Conversations state
+  readonly prComments = signal<any[]>([]);
+  readonly reviewComments = signal<any[]>([]);
+  readonly isLoadingConversations = signal(false);
+  readonly replyingTo = signal<number | null>(null);
+  readonly copiedFileName = signal<string | null>(null);
+  readonly isSubmitting = signal(false);
+
+  replyText = '';
+  newCommentText = '';
+
+  private conversationsLoaded = false;
+
+  readonly totalComments = computed(() =>
+    this.prComments().length + this.reviewComments().length,
+  );
+
+  readonly reviewThreads = computed((): ReviewThread[] => {
+    const all = this.reviewComments();
+    const roots = all.filter(c => !c.in_reply_to_id);
+    return roots.map(root => ({
+      rootId: root.id,
+      path: root.path,
+      line: root.line ?? root.original_line ?? null,
+      diffHunk: root.diff_hunk ?? null,
+      comments: all.filter(c => c.id === root.id || c.in_reply_to_id === root.id),
+    }));
+  });
 
   readonly passingChecks = computed(() =>
     this.pr().checkRuns.filter(c =>
       c.conclusion === 'success' || c.conclusion === 'skipped' || c.conclusion === 'neutral',
     ),
   );
+
+  constructor() {
+    // Reset conversations when PR changes
+    effect(() => {
+      this.pr();
+      this.conversationsLoaded = false;
+      this.prComments.set([]);
+      this.reviewComments.set([]);
+      this.replyingTo.set(null);
+      this.replyText = '';
+      this.newCommentText = '';
+    });
+  }
+
+  switchToConversations(): void {
+    this.activeTab.set('conversations');
+    if (!this.conversationsLoaded) {
+      this.loadConversations();
+    }
+  }
+
+  async loadConversations(): Promise<void> {
+    const { base, number } = this.pr().pr;
+    const owner = base.repo.owner.login;
+    const repo = base.repo.name;
+    this.isLoadingConversations.set(true);
+    try {
+      const [comments, reviewComments] = await Promise.all([
+        firstValueFrom(this.api.getPrComments(owner, repo, number)),
+        firstValueFrom(this.api.getPrReviewComments(owner, repo, number)),
+      ]);
+      this.prComments.set(comments);
+      this.reviewComments.set(reviewComments);
+      this.conversationsLoaded = true;
+    } finally {
+      this.isLoadingConversations.set(false);
+    }
+  }
+
+  async submitReply(threadRootId: number, _path: string): Promise<void> {
+    const body = this.replyText.trim();
+    if (!body) return;
+    const { base, number } = this.pr().pr;
+    const owner = base.repo.owner.login;
+    const repo = base.repo.name;
+    this.isSubmitting.set(true);
+    try {
+      const newComment = await firstValueFrom(
+        this.api.replyToReviewComment(owner, repo, number, threadRootId, body),
+      );
+      this.reviewComments.update(list => [...list, newComment]);
+      this.replyText = '';
+      this.replyingTo.set(null);
+    } finally {
+      this.isSubmitting.set(false);
+    }
+  }
+
+  async submitComment(): Promise<void> {
+    const body = this.newCommentText.trim();
+    if (!body) return;
+    const { base, number } = this.pr().pr;
+    const owner = base.repo.owner.login;
+    const repo = base.repo.name;
+    this.isSubmitting.set(true);
+    try {
+      const newComment = await firstValueFrom(
+        this.api.createPrComment(owner, repo, number, body),
+      );
+      this.prComments.update(list => [...list, newComment]);
+      this.newCommentText = '';
+    } finally {
+      this.isSubmitting.set(false);
+    }
+  }
+
+  copyFileName(path: string): void {
+    navigator.clipboard.writeText(path).then(() => {
+      this.copiedFileName.set(path);
+      setTimeout(() => this.copiedFileName.set(null), 2000);
+    });
+  }
 
   getFailedSteps(item: WorkflowJobWithErrors) {
     return item.job.steps?.filter(s => s.conclusion === 'failure') ?? [];
@@ -488,18 +808,17 @@ export class PrDetailComponent {
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(f);
     }
-    return Array.from(map.entries()).map(([key, items]) => ({ 
-      key, 
-      failures: items, 
-      suite: items[0].suite 
+    return Array.from(map.entries()).map(([key, items]) => ({
+      key,
+      failures: items,
+      suite: items[0].suite
     }));
   }
 
   copyCommand(group: { key: string; suite: string }): void {
     const originalTarget = group.key.split(':')[1];
-    // Transform component-test or e2e to open-cypress for the command
-    const target = (originalTarget === 'component-test' || originalTarget === 'e2e') 
-      ? 'open-cypress' 
+    const target = (originalTarget === 'component-test' || originalTarget === 'e2e')
+      ? 'open-cypress'
       : originalTarget;
     const fullCommand = `pnpm exec nx run ${group.suite}:${target}`;
     navigator.clipboard.writeText(fullCommand);

@@ -147,6 +147,54 @@ export class GitHubApiService {
   }
 
   /**
+   * Get general comments on a pull request (issue-level comments).
+   */
+  getPrComments(owner: string, repo: string, prNumber: number): Observable<any[]> {
+    const params = new HttpParams().set('per_page', '100');
+    return this.http.get<any[]>(
+      `${API_BASE}/repos/${owner}/${repo}/issues/${prNumber}/comments`,
+      { params },
+    );
+  }
+
+  /**
+   * Get inline code review comments on a pull request.
+   */
+  getPrReviewComments(owner: string, repo: string, prNumber: number): Observable<any[]> {
+    const params = new HttpParams().set('per_page', '100');
+    return this.http.get<any[]>(
+      `${API_BASE}/repos/${owner}/${repo}/pulls/${prNumber}/comments`,
+      { params },
+    );
+  }
+
+  /**
+   * Post a general comment on a pull request.
+   */
+  createPrComment(owner: string, repo: string, prNumber: number, body: string): Observable<any> {
+    return this.http.post<any>(
+      `${API_BASE}/repos/${owner}/${repo}/issues/${prNumber}/comments`,
+      { body },
+    );
+  }
+
+  /**
+   * Reply to an inline review comment.
+   */
+  replyToReviewComment(
+    owner: string,
+    repo: string,
+    prNumber: number,
+    commentId: number,
+    body: string,
+  ): Observable<any> {
+    return this.http.post<any>(
+      `${API_BASE}/repos/${owner}/${repo}/pulls/${prNumber}/comments/${commentId}/replies`,
+      { body },
+    );
+  }
+
+  /**
    * Get rate limit status.
    */
   getRateLimit(): Observable<{

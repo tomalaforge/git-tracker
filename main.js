@@ -23,8 +23,12 @@ function createWindow() {
 
   // win.webContents.openDevTools(); // Uncomment for debugging
 
-  win.on('closed', () => {
-    win = null;
+  // On macOS, hide the window instead of destroying it so the session is preserved
+  win.on('close', (event) => {
+    if (process.platform === 'darwin') {
+      event.preventDefault();
+      win.hide();
+    }
   });
 }
 
@@ -39,5 +43,7 @@ app.on('window-all-closed', () => {
 app.on('activate', () => {
   if (win === null) {
     createWindow();
+  } else {
+    win.show();
   }
 });

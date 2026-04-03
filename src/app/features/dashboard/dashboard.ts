@@ -204,7 +204,8 @@ import { AuthService } from '../auth';
               (reload)="onReloadPr(dashboard.selectedPr()!.pr.id)"
               (merge)="onMergePr(dashboard.selectedPr()!.pr.id)"
               (rerunAllFailed)="onRerunFailedForPr(dashboard.selectedPr()!.pr.id)"
-              (rerunJob)="onRerunSingleJob($event)" />
+              (rerunJob)="onRerunSingleJob($event)"
+              (prDetailsUpdated)="onPrDetailsUpdated(dashboard.selectedPr()!.pr.id, $event)" />
           } @else {
             <!-- No PR selected -->
             <div class="h-full flex items-center justify-center">
@@ -282,6 +283,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
     if (index !== -1) {
       await this.dashboard.rerunFailedJobs(index, event.runId, event.repoFullName);
     }
+  }
+
+  async onPrDetailsUpdated(prId: number, event: { title: string; body: string }): Promise<void> {
+    await this.dashboard.updatePrMetadata(prId, event.title, event.body);
   }
 
   onLogout(): void {

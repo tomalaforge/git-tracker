@@ -169,11 +169,70 @@ interface ReviewThread {
             </span>
           }
         </button>
+        <button
+          (click)="activeTab.set('details')"
+          class="px-5 py-2.5 text-xs font-medium transition-colors cursor-pointer border-b-2"
+          [class.border-accent]="activeTab() === 'details'"
+          [class.text-accent]="activeTab() === 'details'"
+          [class.border-transparent]="activeTab() !== 'details'"
+          [class.text-text-muted]="activeTab() !== 'details'"
+          [class.hover:text-text-primary]="activeTab() !== 'details'">
+          Details
+        </button>
       </div>
 
       <!-- Content area - scrollable -->
       <div class="flex-1 overflow-y-auto">
-        @if (activeTab() === 'conversations') {
+        @if (activeTab() === 'details') {
+          <!-- Details tab -->
+          <div class="p-6 space-y-5">
+            <div class="space-y-1.5">
+              <label class="text-[11px] font-semibold text-text-muted uppercase tracking-wider">Title</label>
+              <input
+                [(ngModel)]="editTitle"
+                type="text"
+                class="w-full px-3 py-2.5 text-sm bg-bg-glass border border-border-glass rounded-xl text-text-primary
+                       placeholder:text-text-muted focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30 transition-colors"
+                placeholder="Pull request title" />
+            </div>
+            <div class="space-y-1.5">
+              <label class="text-[11px] font-semibold text-text-muted uppercase tracking-wider">Description</label>
+              <textarea
+                [(ngModel)]="editBody"
+                rows="16"
+                class="w-full px-3 py-2.5 text-sm bg-bg-glass border border-border-glass rounded-xl text-text-primary
+                       placeholder:text-text-muted focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30
+                       transition-colors resize-none font-mono leading-relaxed"
+                placeholder="Add a description…"></textarea>
+            </div>
+            <div class="flex items-center gap-3">
+              <button
+                (click)="saveDetails()"
+                [disabled]="isSavingDetails() || !editTitle.trim()"
+                class="px-4 py-2 text-xs font-semibold bg-accent text-white rounded-lg
+                       hover:bg-accent/90 transition-all cursor-pointer active:scale-95
+                       disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
+                @if (isSavingDetails()) {
+                  <svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                  </svg>
+                  Saving…
+                } @else {
+                  Save changes
+                }
+              </button>
+              @if (detailsSaveSuccess()) {
+                <span class="text-xs text-success flex items-center gap-1 font-medium">
+                  <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
+                  </svg>
+                  Saved
+                </span>
+              }
+            </div>
+          </div>
+        } @else if (activeTab() === 'conversations') {
           <!-- Conversations tab -->
           <div class="flex flex-col h-full">
             @if (isLoadingConversations()) {
@@ -684,9 +743,10 @@ export class PrDetailComponent {
   readonly rerunAllFailed = output<void>();
   readonly copyLink = output<string>();
   readonly rerunJob = output<{ runId: number; repoFullName: string }>();
+  readonly prDetailsUpdated = output<{ title: string; body: string }>();
 
   readonly copied = signal(false);
-  readonly activeTab = signal<'ci' | 'conversations'>('ci');
+  readonly activeTab = signal<'ci' | 'conversations' | 'details'>('ci');
 
   // Conversations state
   readonly prComments = signal<any[]>([]);
@@ -701,6 +761,12 @@ export class PrDetailComponent {
   showCommentBox = false;
 
   private conversationsLoaded = false;
+
+  // Details tab state
+  readonly isSavingDetails = signal(false);
+  readonly detailsSaveSuccess = signal(false);
+  editTitle = '';
+  editBody = '';
 
   readonly totalComments = computed(() =>
     this.prComments().length + this.reviewComments().length,
@@ -725,15 +791,18 @@ export class PrDetailComponent {
   );
 
   constructor() {
-    // Reset conversations when PR changes
+    // Reset conversations and details when PR changes
     effect(() => {
-      this.pr();
+      const pr = this.pr();
       this.conversationsLoaded = false;
       this.prComments.set([]);
       this.reviewComments.set([]);
       this.replyingTo.set(null);
       this.replyText = '';
       this.newCommentText = '';
+      this.editTitle = pr.pr.title;
+      this.editBody = pr.pr.body ?? '';
+      this.detailsSaveSuccess.set(false);
     });
   }
 
@@ -797,6 +866,19 @@ export class PrDetailComponent {
       this.showCommentBox = false;
     } finally {
       this.isSubmitting.set(false);
+    }
+  }
+
+  async saveDetails(): Promise<void> {
+    const title = this.editTitle.trim();
+    if (!title) return;
+    this.isSavingDetails.set(true);
+    try {
+      this.prDetailsUpdated.emit({ title, body: this.editBody });
+      this.detailsSaveSuccess.set(true);
+      setTimeout(() => this.detailsSaveSuccess.set(false), 3000);
+    } finally {
+      this.isSavingDetails.set(false);
     }
   }
 

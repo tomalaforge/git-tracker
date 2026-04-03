@@ -348,6 +348,20 @@ export class DashboardService {
     }
   }
 
+  async updatePrMetadata(prId: number, title: string, body: string): Promise<void> {
+    const index = this._prList().findIndex((p) => p.pr.id === prId);
+    if (index === -1) return;
+    const { base, number } = this._prList()[index].pr;
+    const owner = base.repo.owner.login;
+    const repo = base.repo.name;
+    const updated = await firstValueFrom(this.api.updatePullRequest(owner, repo, number, title, body));
+    this._prList.update((list) => {
+      const copy = [...list];
+      copy[index] = { ...copy[index], pr: { ...copy[index].pr, title: updated.title, body: updated.body } };
+      return copy;
+    });
+  }
+
   private computeReviewStatus(reviews: any[]): any {
     if (reviews.length === 0) return 'PENDING';
 

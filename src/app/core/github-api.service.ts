@@ -195,6 +195,22 @@ export class GitHubApiService {
   }
 
   /**
+   * Update a pull request's title and/or body.
+   */
+  updatePullRequest(
+    owner: string,
+    repo: string,
+    prNumber: number,
+    title: string,
+    body: string,
+  ): Observable<PullRequest> {
+    return this.http.patch<PullRequest>(
+      `${API_BASE}/repos/${owner}/${repo}/pulls/${prNumber}`,
+      { title, body },
+    );
+  }
+
+  /**
    * Get rate limit status.
    */
   getRateLimit(): Observable<{

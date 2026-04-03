@@ -1,0 +1,17 @@
+{
+  "productName": "GitTracker",
+  "appId": "com.tomalaforge.gittracker",
+  "directories": {
+    "output": "dist/desktop"
+  },
+  "files": [
+    "dist/git-tracker/browser/**/*",
+    "main.js",
+    "preload.js",
+    "package.json"
+  ],
+  "mac": {
+    "icon": "public/app-icon.png",
+    "target": ["dmg", "zip"]
+  }
+}

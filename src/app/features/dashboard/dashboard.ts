@@ -1,5 +1,6 @@
-import { Component, inject, OnInit, OnDestroy } from '@angular/core';
+import { Component, inject, OnInit, OnDestroy, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { DashboardService } from './dashboard.service';
 import { PrSidebarItemComponent } from './pr-sidebar-item';
@@ -9,7 +10,7 @@ import { AuthService } from '../auth';
 @Component({
   selector: 'gt-dashboard',
   standalone: true,
-  imports: [PrSidebarItemComponent, PrDetailComponent, DatePipe],
+  imports: [PrSidebarItemComponent, PrDetailComponent, DatePipe, FormsModule],
   template: `
     <div class="h-screen flex flex-col">
       <!-- Header -->
@@ -133,11 +134,38 @@ import { AuthService } from '../auth';
         <!-- LEFT SIDEBAR — PR list -->
         <div class="w-[360px] shrink-0 border-r border-border-glass flex flex-col bg-bg-secondary/30">
           <!-- Sidebar header -->
-          <div class="shrink-0 px-4 py-2.5 border-b border-border-glass flex items-center justify-between">
-            <span class="text-xs font-semibold text-text-secondary uppercase tracking-wider">Pull Requests</span>
-            @if (dashboard.stats().pending > 0) {
-              <span class="text-[10px] text-pending animate-pulse-slow">● auto-refreshing</span>
-            }
+          <div class="shrink-0 px-4 py-2.5 border-b border-border-glass flex flex-col gap-2">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-semibold text-text-secondary uppercase tracking-wider">Pull Requests</span>
+              @if (dashboard.stats().pending > 0) {
+                <span class="text-[10px] text-pending animate-pulse-slow">● auto-refreshing</span>
+              }
+            </div>
+            <!-- Author filter -->
+            <div class="flex items-center gap-1.5">
+              <input
+                type="text"
+                [(ngModel)]="authorFilterInput"
+                (keydown.enter)="onApplyAuthorFilter()"
+                placeholder="Filter by author…"
+                class="flex-1 min-w-0 px-2.5 py-1 text-[11px] rounded-lg bg-bg-glass border border-border-glass
+                       text-text-primary placeholder-text-muted focus:outline-none focus:border-indigo-500
+                       transition-colors" />
+              <button
+                (click)="onApplyAuthorFilter()"
+                class="px-2 py-1 text-[11px] font-medium rounded-lg bg-indigo-600 hover:bg-indigo-700
+                       text-white transition-colors cursor-pointer active:scale-95 shrink-0">
+                OK
+              </button>
+              @if (dashboard.filterAuthor()) {
+                <button
+                  (click)="onClearAuthorFilter()"
+                  class="px-2 py-1 text-[11px] font-medium rounded-lg bg-bg-glass border border-border-glass
+                         text-text-secondary hover:text-danger hover:border-danger transition-colors cursor-pointer active:scale-95 shrink-0">
+                  ✕
+                </button>
+              }
+            </div>
           </div>
 
           <!-- PR list - scrollable -->
@@ -201,6 +229,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
   readonly auth = inject(AuthService);
   private readonly router = inject(Router);
 
+  authorFilterInput = '';
+
   ngOnInit(): void {
     this.dashboard.loadPullRequests();
     this.dashboard.startAutoRefresh(15000, 60000);
@@ -211,6 +241,18 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   onRefreshAll(): void {
+    this.dashboard.loadPullRequests();
+  }
+
+  onApplyAuthorFilter(): void {
+    const trimmed = this.authorFilterInput.trim();
+    this.dashboard.setFilterAuthor(trimmed || null);
+    this.dashboard.loadPullRequests();
+  }
+
+  onClearAuthorFilter(): void {
+    this.authorFilterInput = '';
+    this.dashboard.setFilterAuthor(null);
     this.dashboard.loadPullRequests();
   }
 

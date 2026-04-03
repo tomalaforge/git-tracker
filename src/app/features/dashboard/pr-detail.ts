@@ -229,6 +229,9 @@ interface ReviewThread {
           [class.hover:text-text-primary]="activeTab() !== 'conversations'"
         >
           Conversations
+          @if (pr().hasOpenDiscussions) {
+            <span class="w-2 h-2 rounded-full bg-accent animate-pulse shadow-[0_0_8px_rgba(var(--accent-rgb),0.6)]" title="Unresolved conversations"></span>
+          }
           @if (totalComments() > 0) {
             <span
               class="px-1.5 py-0.5 rounded-full text-[10px] font-semibold"
@@ -618,9 +621,7 @@ interface ReviewThread {
                 </div>
                 <h3 class="text-lg font-semibold text-success mb-1">All checks passed</h3>
                 <p class="text-sm text-text-muted">
-                  {{ pr().checkRuns.length }} check{{
-                    pr().checkRuns.length !== 1 ? 's' : ''
-                  }}
+                  {{ pr().checkRuns.length }} check{{ pr().checkRuns.length !== 1 ? 's' : '' }}
                   completed successfully.
                 </p>
               </div>
@@ -1194,7 +1195,7 @@ export class PrDetailComponent {
     effect(() => {
       const pr = this.pr();
       const currentPrId = pr.pr.id;
-      if (this.lastPrId !== undefined && this.lastPrId !== currentPrId) {
+      if (this.lastPrId !== currentPrId) {
         this.conversationsLoaded = false;
         this.prComments.set([]);
         this.reviewComments.set([]);

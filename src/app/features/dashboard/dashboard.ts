@@ -17,58 +17,45 @@ import { AuthService } from '../auth';
       <header class="shrink-0 bg-bg-primary/80 backdrop-blur-xl border-b border-border-glass z-50">
         <div class="px-6 py-3">
           <div class="flex items-center justify-between">
-            <div class="flex items-center gap-3">
-              <div
-                class="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 shadow-lg shadow-indigo-500/20">
-                <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
+            <div class="flex items-center gap-6">
+              <div class="flex items-center gap-3">
+                <div
+                  class="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 shadow-lg shadow-indigo-500/20">
+                  <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <div>
+                  <h1 class="text-sm font-bold text-text-primary tracking-tight leading-none">GitTracker</h1>
+                  <p class="text-[10px] text-text-muted mt-0.5">{{ auth.user()?.login }}</p>
+                </div>
               </div>
-              <div>
-                <h1 class="text-sm font-bold text-text-primary tracking-tight">GitTracker</h1>
-                <p class="text-[11px] text-text-muted">{{ auth.user()?.login }}</p>
-              </div>
-            </div>
 
-            <!-- Stats pills -->
-            <div class="hidden sm:flex items-center gap-2">
-              <span class="px-2.5 py-1 rounded-lg bg-bg-glass border border-border-glass text-[11px] font-medium text-text-secondary">
-                {{ dashboard.stats().total }} PRs
-              </span>
-              @if (dashboard.stats().passing > 0) {
-                <span class="px-2.5 py-1 rounded-lg bg-success-bg border border-success-border text-[11px] font-medium text-success">
-                  ✓ {{ dashboard.stats().passing }}
+              <!-- Stats pills next to title -->
+              <div class="hidden sm:flex items-center gap-1.5 border-l border-border-glass pl-6">
+                <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-bg-glass border border-border-glass text-text-secondary uppercase tracking-tight">
+                  {{ dashboard.stats().total }} PR
                 </span>
-              }
-              @if (dashboard.stats().failing > 0) {
-                <span class="px-2.5 py-1 rounded-lg bg-danger-bg border border-danger-border text-[11px] font-medium text-danger">
-                  ✕ {{ dashboard.stats().failing }}
-                </span>
-              }
-              @if (dashboard.stats().pending > 0) {
-                <span class="px-2.5 py-1 rounded-lg bg-pending-bg border border-pending-border text-[11px] font-medium text-pending">
-                  ⟳ {{ dashboard.stats().pending }}
-                </span>
-              }
+                @if (dashboard.stats().passing > 0) {
+                  <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-success-bg border border-success-border text-success uppercase tracking-tight">
+                    {{ dashboard.stats().passing }} Success
+                  </span>
+                }
+                @if (dashboard.stats().failing > 0) {
+                  <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-danger-bg border border-danger-border text-danger uppercase tracking-tight">
+                    {{ dashboard.stats().failing }} Fails
+                  </span>
+                }
+                @if (dashboard.stats().pending > 0) {
+                  <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-pending-bg border border-pending-border text-pending uppercase tracking-tight">
+                    {{ dashboard.stats().pending }} Running
+                  </span>
+                }
+              </div>
             </div>
 
             <div class="flex items-center gap-2">
-              <!-- Rerun all failed -->
-              @if (dashboard.stats().failing > 0) {
-                <button
-                  (click)="onRerunAllFailed()"
-                  class="px-3 py-1.5 text-[11px] font-medium bg-gradient-to-r from-amber-500 to-orange-600 text-white
-                         rounded-lg hover:from-amber-600 hover:to-orange-700 active:scale-95
-                         transition-all shadow-lg shadow-amber-500/20 cursor-pointer flex items-center gap-1.5">
-                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                      d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                  Rerun All Failed
-                </button>
-              }
-
               <!-- Rate limit -->
               @if (dashboard.rateLimit()) {
                 <span class="hidden md:block text-[11px] text-text-muted">

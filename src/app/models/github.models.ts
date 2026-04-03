@@ -119,6 +119,7 @@ export interface PullRequestWithStatus {
   ciStatus: CIStatus;
   reviewStatus: ReviewStatus;
   isMergeable: boolean;
+  hasOpenDiscussions: boolean;
   checkRuns: CheckRun[];
   failedRuns: WorkflowRun[];
   failedJobs: WorkflowJobWithErrors[];

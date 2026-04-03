@@ -2,7 +2,7 @@ import { Injectable, inject, signal, computed } from '@angular/core';
 import { GitHubApiService } from '../../core';
 import { CiStatusService } from '../ci-status';
 import { AuthService } from '../auth';
-import { PullRequestWithStatus } from '../../models';
+import { PullRequestWithStatus, ReviewStatus } from '../../models';
 import { firstValueFrom } from 'rxjs';
 
 @Injectable({ providedIn: 'root' })
@@ -69,7 +69,7 @@ export class DashboardService {
     const author = this._filterAuthor() ?? user.login;
 
     try {
-      const searchResult = await firstValueFrom(this.api.searchUserPullRequests(author));
+      const searchResult = await firstValueFrom(this.api.searchUserPullRequests(author, 'rosahealth/rosa'));
       const searchItems = searchResult.items;
 
       const prWithStatuses: PullRequestWithStatus[] = [];
@@ -89,6 +89,7 @@ export class DashboardService {
             ciStatus: 'pending',
             reviewStatus: 'PENDING',
             isMergeable: false,
+            hasOpenDiscussions: false,
             checkRuns: [],
             failedRuns: [],
             failedJobs: [],
@@ -199,14 +200,19 @@ export class DashboardService {
 
     try {
       const [owner, repo] = item.pr.base.repo.full_name.split('/');
-      const reviews = await firstValueFrom(this.api.getReviews(owner, repo, item.pr.number));
-      const reviewStatus = this.computeReviewStatus(reviews);
+      const [reviews, discussionStatus] = await Promise.all([
+        firstValueFrom(this.api.getReviews(owner, repo, item.pr.number)),
+        firstValueFrom(this.api.getPrDiscussionsStatus(owner, repo, item.pr.number)),
+      ]);
+      const hasOpenDiscussions = discussionStatus.hasUnresolvedThreads;
+      const reviewStatus = this.computeReviewStatus(reviews, hasOpenDiscussions);
 
       this._prList.update((list) => {
         const updated = [...list];
         updated[index] = {
           ...updated[index],
           reviewStatus,
+          hasOpenDiscussions,
           isMergeable:
             updated[index].ciStatus === 'success' && reviewStatus === 'APPROVED' && !item.pr.draft,
         };
@@ -309,13 +315,15 @@ export class DashboardService {
       const repoFullName = item.pr.base.repo.full_name;
       const [owner, repo] = repoFullName.split('/');
 
-      const [checkRuns, reviews] = await Promise.all([
+      const [checkRuns, reviews, discussionStatus] = await Promise.all([
         this.ciService.loadCheckRuns(item.pr),
         firstValueFrom(this.api.getReviews(owner, repo, item.pr.number)),
+        firstValueFrom(this.api.getPrDiscussionsStatus(owner, repo, item.pr.number)),
       ]);
 
       const ciStatus = this.ciService.computeCIStatus(checkRuns);
-      const reviewStatus = this.computeReviewStatus(reviews);
+      const hasOpenDiscussions = discussionStatus.hasUnresolvedThreads;
+      const reviewStatus = this.computeReviewStatus(reviews, hasOpenDiscussions);
 
       let failedRuns = item.failedRuns;
       let failedJobs = item.failedJobs;
@@ -332,6 +340,7 @@ export class DashboardService {
           checkRuns,
           ciStatus,
           reviewStatus,
+          hasOpenDiscussions,
           isMergeable: ciStatus === 'success' && reviewStatus === 'APPROVED' && !item.pr.draft,
           failedRuns,
           failedJobs,
@@ -362,8 +371,10 @@ export class DashboardService {
     });
   }
 
-  private computeReviewStatus(reviews: any[]): any {
-    if (reviews.length === 0) return 'PENDING';
+  private computeReviewStatus(reviews: any[], hasOpenDiscussions: boolean): ReviewStatus {
+    if (reviews.length === 0) {
+      return hasOpenDiscussions ? 'PENDING' : 'PENDING'; // Wait, if no reviews, it's pending.
+    }
 
     const lastReviews = new Map<string, string>();
     for (const r of reviews) {
@@ -373,6 +384,7 @@ export class DashboardService {
     const states = Array.from(lastReviews.values());
     if (states.includes('CHANGES_REQUESTED')) return 'CHANGES_REQUESTED';
     if (states.includes('APPROVED')) return 'APPROVED';
+    if (states.includes('DISMISSED')) return 'DISMISSED';
     return 'PENDING';
   }
 

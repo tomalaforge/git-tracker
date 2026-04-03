@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
-import { Observable } from 'rxjs';
+import { Observable, map } from 'rxjs';
 import {
   GitHubUser,
   PullRequest,
@@ -23,10 +23,13 @@ export class GitHubApiService {
   /**
    * Search for open PRs authored by the given user.
    */
-  searchUserPullRequests(username: string): Observable<{ items: PullRequest[] }> {
+  searchUserPullRequests(username: string, repo?: string): Observable<{ items: PullRequest[] }> {
     // We cast because the search endpoint returns issue-shaped objects
     // but we enrich them later with full PR data
-    const q = `is:pr is:open author:${username}`;
+    let q = `is:pr is:open author:${username}`;
+    if (repo) {
+      q += ` repo:${repo}`;
+    }
     const params = new HttpParams()
       .set('q', q)
       .set('sort', 'updated')
@@ -219,5 +222,40 @@ export class GitHubApiService {
     return this.http.get<{
       resources: { core: { remaining: number; limit: number; reset: number } };
     }>(`${API_BASE}/rate_limit`);
+  }
+
+  /**
+   * Get PR discussion resolution status via GraphQL.
+   */
+  getPrDiscussionsStatus(
+    owner: string,
+    repo: string,
+    number: number,
+  ): Observable<{ hasUnresolvedThreads: boolean; totalThreads: number }> {
+    const query = `
+      query($owner: String!, $repo: String!, $number: Int!) {
+        repository(owner: $owner, name: $repo) {
+          pullRequest(number: $number) {
+            reviewThreads(last: 100) {
+              totalCount
+              nodes {
+                isResolved
+              }
+            }
+          }
+        }
+      }
+    `;
+    return this.http
+      .post<any>(`${API_BASE}/graphql`, { query, variables: { owner, repo, number } })
+      .pipe(
+        map((res) => {
+          const pr = res?.data?.repository?.pullRequest;
+          const threads = pr?.reviewThreads?.nodes || [];
+          const totalThreads = pr?.reviewThreads?.totalCount || 0;
+          const hasUnresolvedThreads = threads.some((t: any) => !t.isResolved);
+          return { hasUnresolvedThreads, totalThreads };
+        }),
+      );
   }
 }

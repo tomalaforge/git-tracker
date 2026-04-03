@@ -38,35 +38,58 @@ import { CiBadgeComponent } from '../ci-status/ci-badge';
                 · {{ prData().checkRuns.length }} check{{ prData().checkRuns.length !== 1 ? 's' : '' }}
               }
             </span>
-            @if (prData().reviewStatus === 'APPROVED') {
-              <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-success/10 text-success border border-success/20 shrink-0">
-                <svg class="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20">
-                  <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
-                </svg>
-                Approved
-              </span>
-            } @else if (prData().reviewStatus === 'CHANGES_REQUESTED') {
-              <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-danger/10 text-danger border border-danger/20 shrink-0">
-                <svg class="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20">
-                  <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
-                </svg>
-                Changes
-              </span>
-            }
           </div>
         </div>
-        <div class="shrink-0 pt-1">
-          @if (prData().isLoading) {
-            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-bg-glass text-text-muted border border-border-glass">
-              <svg class="w-3 h-3 animate-spin-slow mr-1" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-            </span>
-          } @else {
-            <gt-ci-badge [status]="prData().ciStatus" />
-          }
-        </div>
+
+            <div class="flex items-center gap-1.5 pt-0.5">
+              @if (prData().isLoading) {
+                <svg class="w-3.5 h-3.5 animate-spin-slow text-text-muted" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              } @else {
+                <!-- CI Status icon (mini) -->
+                <div [title]="'CI Status: ' + prData().ciStatus" class="flex-shrink-0">
+                  <gt-ci-badge [status]="prData().ciStatus" size="mini" />
+                </div>
+
+                <!-- Unresolved Discussions Icon -->
+                @if (prData().hasOpenDiscussions) {
+                  <div title="Unresolved Discussions" class="text-accent flex-shrink-0">
+                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                      <path fill-rule="evenodd" d="M18 10c0 3.866-3.582 7-8 7a8.841 8.841 0 01-4.083-.98L2 17l1.338-3.123C2.493 12.767 2 11.434 2 10c0-3.866 3.582-7 8-7s8 3.134 8 7zM7 9H5v2h2V9zm8 0h-2v2h2V9zm-4 0H9v2h2V9z" clip-rule="evenodd" />
+                    </svg>
+                  </div>
+                }
+
+                <!-- Review Status Icon -->
+                @if (prData().reviewStatus === 'APPROVED') {
+                  <div title="Approved" class="text-success flex-shrink-0">
+                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                      <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                    </svg>
+                  </div>
+                } @else if (prData().reviewStatus === 'CHANGES_REQUESTED') {
+                  <div title="Changes Requested" class="text-danger flex-shrink-0">
+                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                      <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+                    </svg>
+                  </div>
+                } @else if (prData().reviewStatus === 'PENDING') {
+                  <div title="Pending Review" class="text-warning flex-shrink-0">
+                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                      <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd" />
+                    </svg>
+                  </div>
+                } @else if (prData().reviewStatus === 'DISMISSED') {
+                  <div title="Review Dismissed" class="text-text-muted flex-shrink-0">
+                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                      <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM7 9a1 1 0 000 2h6a1 1 0 100-2H7z" clip-rule="evenodd" />
+                    </svg>
+                  </div>
+                }
+              }
+            </div>
       </div>
     </button>
   `,

@@ -1,4 +1,4 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, shell } = require('electron');
 const path = require('path');
 const url = require('url');
 
@@ -20,6 +20,12 @@ function createWindow() {
   // Load the built Angular app
   const indexPath = path.join(__dirname, 'dist/git-tracker/browser/index.html');
   win.loadFile(indexPath);
+
+  // Open external links in the default browser instead of a new Electron window
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url);
+    return { action: 'deny' };
+  });
 
   // win.webContents.openDevTools(); // Uncomment for debugging
 

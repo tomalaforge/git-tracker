@@ -17,9 +17,16 @@ import { CiBadgeComponent } from '../ci-status/ci-badge';
       [class.border-l-accent]="isSelected()">
       <div class="flex items-start justify-between gap-2">
         <div class="min-w-0 flex-1">
-          <p class="text-[11px] text-text-muted font-mono truncate">
-            {{ prData().pr.base.repo.full_name }}#{{ prData().pr.number }}
-          </p>
+          <div class="flex items-center gap-2 mb-0.5">
+            <p class="text-[11px] text-text-muted font-mono truncate">
+              {{ prData().pr.base.repo.full_name }}#{{ prData().pr.number }}
+            </p>
+            @if (prData().pr.draft) {
+              <span class="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-bold bg-bg-glass text-text-muted border border-border-glass uppercase tracking-tight shrink-0">
+                Draft
+              </span>
+            }
+          </div>
           <p class="text-sm font-medium text-text-primary leading-snug line-clamp-2 mt-0.5"
             [class.text-accent]="isSelected()">
             {{ prData().pr.title }}
@@ -27,6 +34,9 @@ import { CiBadgeComponent } from '../ci-status/ci-badge';
           <div class="flex items-center gap-1.5 mt-1 flex-wrap">
             <span class="text-[11px] text-text-muted truncate">
               {{ prData().pr.head.ref }} · {{ prData().pr.updated_at | date:'MMM d, HH:mm' }}
+              @if (prData().checkRuns.length > 0) {
+                · {{ prData().checkRuns.length }} check{{ prData().checkRuns.length !== 1 ? 's' : '' }}
+              }
             </span>
             @if (prData().reviewStatus === 'APPROVED') {
               <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-success/10 text-success border border-success/20 shrink-0">

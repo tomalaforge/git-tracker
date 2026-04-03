@@ -19,6 +19,7 @@ export class DashboardService {
     null,
   );
   private readonly _selectedPrId = signal<number | null>(null);
+  private readonly _filterAuthor = signal<string | null>(null);
 
   readonly prList = this._prList.asReadonly();
   readonly isLoading = this._isLoading.asReadonly();
@@ -26,6 +27,7 @@ export class DashboardService {
   readonly error = this._error.asReadonly();
   readonly rateLimit = this._rateLimit.asReadonly();
   readonly selectedPrId = this._selectedPrId.asReadonly();
+  readonly filterAuthor = this._filterAuthor.asReadonly();
 
   readonly selectedPr = computed(() => {
     const id = this._selectedPrId();
@@ -50,6 +52,10 @@ export class DashboardService {
     this._selectedPrId.set(prId);
   }
 
+  setFilterAuthor(author: string | null): void {
+    this._filterAuthor.set(author);
+  }
+
   /**
    * Initial full load of all PRs.
    */
@@ -60,8 +66,10 @@ export class DashboardService {
     this._isLoading.set(true);
     this._error.set(null);
 
+    const author = this._filterAuthor() ?? user.login;
+
     try {
-      const searchResult = await firstValueFrom(this.api.searchUserPullRequests(user.login));
+      const searchResult = await firstValueFrom(this.api.searchUserPullRequests(author));
       const searchItems = searchResult.items;
 
       const prWithStatuses: PullRequestWithStatus[] = [];

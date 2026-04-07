@@ -184,8 +184,8 @@ interface ReviewThread {
                 [disabled]="isAddingReviewers()"
                 [title]="'Add Betrozov, Mathieu-JJ and MaximeSohetRosa as reviewers'"
               >
-                @if (reviewersAdded()) {
-                  <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                @if (reviewersAdded() || hasStandardReviewers()) {
+                  <svg class="w-3.5 h-3.5 text-success" fill="currentColor" viewBox="0 0 20 20">
                     <path
                       fill-rule="evenodd"
                       d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
@@ -899,18 +899,29 @@ interface ReviewThread {
             <!-- FAILURE — detailed breakdown -->
             <div class="p-6">
               <div class="flex items-center justify-between mb-4">
-                <h3 class="text-base font-semibold text-danger flex items-center gap-2">
-                  <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                    <path
-                      fill-rule="evenodd"
-                      d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
-                      clip-rule="evenodd"
-                    />
-                  </svg>
-                  {{ pr().failedJobs.length }} failed job{{
-                    pr().failedJobs.length !== 1 ? 's' : ''
-                  }}
-                </h3>
+                <div class="flex items-center gap-3">
+                  <h3 class="text-base font-semibold text-danger flex items-center gap-2">
+                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                      <path
+                        fill-rule="evenodd"
+                        d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
+                        clip-rule="evenodd"
+                      />
+                    </svg>
+                    {{ pr().failedJobs.length }} failed job{{
+                      pr().failedJobs.length !== 1 ? 's' : ''
+                    }}
+                  </h3>
+
+                  @if (nxCloudUrl()) {
+                    <a [href]="nxCloudUrl()!" target="_blank" class="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-full hover:bg-indigo-500/20 transition-all">
+                      <svg class="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 2L2 19.74h20L12 2zm0 3.52l7.14 12.65H4.86L12 5.52z"/>
+                      </svg>
+                      Nx Cloud ↗
+                    </a>
+                  }
+                </div>
                 <button
                   (click)="rerunAllFailed.emit()"
                   [disabled]="!isCiComplete()"
@@ -1245,6 +1256,25 @@ interface ReviewThread {
                   </div>
                 }
               </div>
+              <!-- Show ongoing checks if any -->
+              @if (runningChecks().length > 0) {
+                <div class="mt-6">
+                  <p class="text-[10px] text-pending font-semibold uppercase tracking-wider mb-2">
+                    Ongoing Checks ({{ runningChecks().length }})
+                  </p>
+                  <div class="space-y-1.5">
+                    @for (check of runningChecks(); track check.id) {
+                      <div class="flex items-center gap-2 px-3 py-2 bg-bg-glass border border-border-glass rounded-lg">
+                        <svg class="w-3.5 h-3.5 text-pending animate-spin-slow shrink-0" fill="none" viewBox="0 0 24 24">
+                          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                        </svg>
+                        <span class="text-xs text-text-secondary">{{ check.name }}</span>
+                      </div>
+                    }
+                  </div>
+                </div>
+              }
 
               <!-- Also show passing checks for context -->
               @if (passingChecks().length > 0) {
@@ -1367,6 +1397,20 @@ export class PrDetailComponent {
       (c) => c.conclusion === 'success' || c.conclusion === 'skipped' || c.conclusion === 'neutral',
     ),
   );
+
+  readonly runningChecks = computed(() =>
+    this.pr().checkRuns.filter((c) => c.status === 'in_progress' || c.status === 'queued'),
+  );
+
+  readonly nxCloudUrl = computed(() => {
+    return this.pr().failedJobs.find(j => !!j.nxCloudUrl)?.nxCloudUrl;
+  });
+
+  readonly hasStandardReviewers = computed(() => {
+    const reviewers = this.pr().pr.requested_reviewers || [];
+    const targetLogins = ['Betrozov', 'Mathieu-JJ', 'MaximeSohetRosa'];
+    return reviewers.some(r => targetLogins.includes(r.login));
+  });
 
   private lastPrId?: number;
 

@@ -17,7 +17,7 @@ import { CiBadgeComponent } from '../ci-status/ci-badge';
       [class.border-l-accent]="isSelected()">
       
       <!-- Unread indicator -->
-      @if (prData().unseenDiscussions || prData().unseenApproval || prData().unseenCiFinish) {
+      @if (!isSelected() && (prData().unseenDiscussions || prData().unseenApproval || prData().unseenCiFinish)) {
         <div class="absolute top-2 right-2 w-2 h-2 rounded-full bg-accent shadow-[0_0_8px_rgba(var(--accent-rgb),0.6)]"></div>
       }
 
@@ -50,8 +50,13 @@ import { CiBadgeComponent } from '../ci-status/ci-badge';
             <div class="flex items-center gap-1.5 pt-0.5">
               <!-- CI Status icon (mini) -->
               @if (!prData().isLoading || prData().ciStatus !== 'pending') {
-                <div [title]="'CI Status: ' + prData().ciStatus" class="flex-shrink-0">
+                <div [title]="'CI Status: ' + prData().ciStatus" class="flex-shrink-0 flex items-center gap-1">
                   <gt-ci-badge [status]="prData().ciStatus" size="mini" />
+                  @if (prData().ciStatus === 'failure' && prData().failedJobs.length > 0) {
+                    <span class="text-[10px] font-bold text-danger border border-danger/30 bg-danger-bg px-1 rounded-sm min-w-[14px] text-center">
+                      {{ prData().failedJobs.length }}
+                    </span>
+                  }
                 </div>
               }
 

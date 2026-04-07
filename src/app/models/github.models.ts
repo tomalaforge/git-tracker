@@ -38,6 +38,10 @@ export interface PullRequest {
   }>;
   draft: boolean;
   mergeable_state?: string;
+  requested_reviewers: Array<{
+    login: string;
+    avatar_url: string;
+  }>;
 }
 
 export type CIStatus = 'success' | 'failure' | 'pending' | 'neutral' | 'unknown';
@@ -139,4 +143,5 @@ export interface WorkflowJobWithErrors {
   runName: string;
   runId: number;
   repoFullName: string;
+  nxCloudUrl?: string;
 }

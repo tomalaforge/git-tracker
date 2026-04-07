@@ -67,7 +67,7 @@ export class CiStatusService {
 
     try {
       const result = await firstValueFrom(this.api.getWorkflowRuns(owner, repo, sha));
-      return result.workflow_runs.filter(run => run.conclusion === 'failure');
+      return result.workflow_runs.filter(run => run.conclusion === 'failure' || run.status === 'in_progress');
     } catch {
       return [];
     }
@@ -91,7 +91,7 @@ export class CiStatusService {
 
         for (const job of failedJobs) {
           // Fetch annotations + logs in parallel
-          const [annotations, { failures: testFailures, logAccessible }] = await Promise.all([
+          const [annotations, { failures: testFailures, logAccessible, nxCloudUrl }] = await Promise.all([
             firstValueFrom(this.api.getAnnotations(owner, repo, job.id)).catch(() => [] as CheckAnnotation[]),
             this.logParser.parseJobLogs(owner, repo, job.id),
           ]);
@@ -104,6 +104,7 @@ export class CiStatusService {
             runName: run.name,
             runId: run.id,
             repoFullName: `${owner}/${repo}`,
+            nxCloudUrl,
           });
         }
       } catch {

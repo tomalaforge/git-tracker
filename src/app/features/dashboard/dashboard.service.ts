@@ -64,7 +64,12 @@ export class DashboardService {
 
     effect(() => {
       const list = this._prList();
-      const count = list.filter((p) => p.unseenDiscussions || p.unseenApproval || p.unseenCiFinish).length;
+      const selectedId = this._selectedPrId();
+      const count = list.filter(
+        (p) =>
+          p.pr.id !== selectedId &&
+          (p.unseenDiscussions || p.unseenApproval || p.unseenCiFinish),
+      ).length;
       const electronAPI = (window as any).electronAPI;
       if (electronAPI?.setBadgeCount) {
         electronAPI.setBadgeCount(count);
@@ -81,6 +86,19 @@ export class DashboardService {
   }
 
   selectPr(prId: number): void {
+    const list = this._prList();
+    const idx = list.findIndex((p) => p.pr.id === prId);
+    if (idx === -1) {
+      this._selectedPrId.set(prId);
+      return;
+    }
+
+    const item = list[idx];
+    if (!item.unseenDiscussions && !item.unseenApproval && !item.unseenCiFinish) {
+      this._selectedPrId.set(prId);
+      return;
+    }
+
     this._selectedPrId.set(prId);
     // Clear notifications for this PR
     this._prList.update((list) => {
@@ -256,6 +274,7 @@ export class DashboardService {
   /**
    * Fast refresh for PRs with running CI.
    */
+<<<<<<< HEAD
   async refreshPendingPrActivity(): Promise<void> {
     const list = this._prList();
     const pendingIndices = list
@@ -266,10 +285,47 @@ export class DashboardService {
 
     await Promise.allSettled(pendingIndices.map((index) => this.pollPrActivityForIndex(index)));
     this._lastRefresh.set(new Date());
+=======
+  async refreshPendingPrs(): Promise<void> {
+    const currentList = this._prList();
+    const pendingIndices = currentList
+      .map((item, i) => (item.ciStatus === 'pending' ? i : -1))
+      .filter((i) => i !== -1);
+
+    if (pendingIndices.length === 0) return;
+
+    // Fetch refreshed items in background without showing loader for background sync
+    const refreshedPromises = pendingIndices.map((idx) => {
+      const item = currentList[idx];
+      return this.loadUpdatedPrStatus(item);
+    });
+
+    const results = await Promise.allSettled(refreshedPromises);
+    
+    let hasChanges = false;
+    const newList = [...currentList];
+
+    results.forEach((res, i) => {
+      const originalIdx = pendingIndices[i];
+      if (res.status === 'fulfilled') {
+        if (!this.arePrsEffectivelyEqual(newList[originalIdx], res.value)) {
+          newList[originalIdx] = res.value;
+          hasChanges = true;
+        }
+      }
+    });
+
+    if (hasChanges) {
+      this._prList.set(newList);
+      this._lastRefresh.set(new Date());
+    }
+    
+>>>>>>> f5be03b (fix many prop)
     this.updateRateLimit();
   }
 
   /**
+<<<<<<< HEAD
    * Slow refresh for non-pending PRs, to discover state changes without
    * constantly re-rendering cards.
    */
@@ -283,7 +339,202 @@ export class DashboardService {
 
     await Promise.allSettled(nonPendingIndices.map((index) => this.pollPrActivityForIndex(index)));
     this._lastRefresh.set(new Date());
+=======
+   * Sync the PR list: add new PRs, remove merged/closed ones, and refresh status for all.
+   * This handles detecting new PRs, removed PRs, and job restarts.
+   */
+  async syncPullRequests(): Promise<void> {
+    const user = this.auth.user();
+    if (!user) return;
+
+>>>>>>> f5be03b (fix many prop)
     this.updateRateLimit();
+
+    const author = this._filterAuthor() ?? user.login;
+    try {
+      const searchResult = await firstValueFrom(this.api.searchUserPullRequests(author, 'rosahealth/rosa'));
+      const searchItems = searchResult.items;
+      
+      const currentPrs = this._prList();
+      const currentMap = new Map(currentPrs.map(p => [p.pr.id, p]));
+      const searchIds = new Set(searchItems.map(item => item.id));
+
+      // 1. Prepare initial list with most recent PR metadata
+      let updatedList: PullRequestWithStatus[] = [];
+      const newItems: any[] = [];
+
+      for (const item of searchItems) {
+        const existing = currentMap.get(item.id);
+        if (existing) {
+          // Keep existing but with updated PR vitals (title, body, updated_at)
+          updatedList.push({ ...existing, pr: item });
+        } else {
+          // It's a new PR
+          newItems.push(item);
+        }
+      }
+
+      // 2. Fetch full data for NEW items
+      for (const item of newItems) {
+        const repoFullName = this.extractRepoFromUrl(item.html_url);
+        if (!repoFullName) continue;
+        const [owner, repo] = repoFullName.split('/');
+        const prNumber = this.extractPrNumber(item.html_url);
+        if (!prNumber) continue;
+
+        try {
+          const fullPr = await firstValueFrom(this.api.getPullRequest(owner, repo, prNumber));
+          updatedList.push({
+            pr: fullPr,
+            ciStatus: 'pending',
+            reviewStatus: 'PENDING',
+            isMergeable: false,
+            discussionStatus: 'NONE',
+            checkRuns: [],
+            failedRuns: [],
+            failedJobs: [],
+            isLoading: false, // Don't show loader for background sync
+            isMerging: false,
+            unseenDiscussions: false,
+            unseenApproval: false,
+            unseenCiFinish: false,
+          });
+        } catch { /* skip */ }
+      }
+
+      // Re-sort if list changed
+      updatedList.sort((a, b) => new Date(b.pr.updated_at).getTime() - new Date(a.pr.updated_at).getTime());
+
+      // 3. Refresh status for ALL active PRs in parallel (in-memory)
+      const refreshedList = await Promise.all(updatedList.map(item => this.loadUpdatedPrStatus(item)));
+
+      // 4. Final Comparison for atomic update
+      if (this.areListsEffectivelyDifferent(currentPrs, refreshedList)) {
+        this._prList.set(refreshedList);
+        this._lastRefresh.set(new Date());
+      }
+    } catch (err) {
+      // background sync fail
+    }
+  }
+
+  private areListsEffectivelyDifferent(a: PullRequestWithStatus[], b: PullRequestWithStatus[]): boolean {
+    if (a.length !== b.length) return true;
+    for (let i = 0; i < a.length; i++) {
+      if (!this.arePrsEffectivelyEqual(a[i], b[i])) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Deeply compares two PullRequestWithStatus objects to avoid unnecessary UI updates.
+   */
+  private arePrsEffectivelyEqual(a: PullRequestWithStatus, b: PullRequestWithStatus): boolean {
+    // 1. Meta-data
+    if (a.pr.updated_at !== b.pr.updated_at) return false;
+    if (a.pr.head.sha !== b.pr.head.sha) return false;
+    if (a.pr.title !== b.pr.title) return false;
+    
+    // 2. Statuses
+    if (a.ciStatus !== b.ciStatus) return false;
+    if (a.reviewStatus !== b.reviewStatus) return false;
+    if (a.discussionStatus !== b.discussionStatus) return false;
+    if (a.isMergeable !== b.isMergeable) return false;
+    
+    // 3. Unseen flags
+    if (a.unseenApproval !== b.unseenApproval) return false;
+    if (a.unseenCiFinish !== b.unseenCiFinish) return false;
+    if (a.unseenDiscussions !== b.unseenDiscussions) return false;
+
+    // 4. Loading/Merging state
+    if (a.isLoading !== b.isLoading) return false;
+    if (a.isMerging !== b.isMerging) return false;
+
+    // 5. Detailed data (Check runs, etc.)
+    if (a.checkRuns.length !== b.checkRuns.length) return false;
+    
+    // Quick check for runner status changes
+    for (let i = 0; i < a.checkRuns.length; i++) {
+        if (a.checkRuns[i].status !== b.checkRuns[i].status || 
+            a.checkRuns[i].conclusion !== b.checkRuns[i].conclusion) return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Fetch refreshed status for a PR without touching the signal.
+   * Returns a NEW object with the latest status.
+   */
+  private async loadUpdatedPrStatus(item: PullRequestWithStatus): Promise<PullRequestWithStatus> {
+    try {
+      const repoFullName = item.pr.base.repo.full_name;
+      const [owner, repo] = repoFullName.split('/');
+
+      const [checkRuns, reviews, discussionStatusData] = await Promise.all([
+        this.ciService.loadCheckRuns(item.pr),
+        firstValueFrom(this.api.getReviews(owner, repo, item.pr.number)),
+        firstValueFrom(this.api.getPrDiscussionsStatus(owner, repo, item.pr.number)),
+      ]);
+
+      const isSelected = this._selectedPrId() === item.pr.id;
+
+      const newCiStatus = this.ciService.computeCIStatus(checkRuns);
+      const newDiscussionStatus = this.computeDiscussionStatus(discussionStatusData.unresolvedThreads);
+      const hasOpenDiscussions = newDiscussionStatus !== 'NONE';
+      const newReviewStatus = this.computeReviewStatus(reviews, hasOpenDiscussions);
+
+      let unseenCiFinish = item.unseenCiFinish;
+      let unseenApproval = item.unseenApproval;
+      let unseenDiscussions = item.unseenDiscussions;
+
+      // Check for CI change
+      if (item.ciStatus === 'pending' && (newCiStatus === 'success' || newCiStatus === 'failure')) {
+        unseenCiFinish = !isSelected;
+      }
+
+      // Check for approval change
+      if (item.reviewStatus !== 'APPROVED' && newReviewStatus === 'APPROVED') {
+        unseenApproval = !isSelected;
+      }
+
+      // Check for new discussions
+      if (item.discussionStatus !== 'NEW_CONTENT' && newDiscussionStatus === 'NEW_CONTENT') {
+        unseenDiscussions = !isSelected;
+      }
+
+      // If selected, always clear flags
+      if (isSelected) {
+        unseenCiFinish = false;
+        unseenApproval = false;
+        unseenDiscussions = false;
+      }
+
+      let failedRuns = item.failedRuns;
+      let failedJobs = item.failedJobs;
+
+      if (checkRuns.some(cr => cr.conclusion === 'failure')) {
+        failedRuns = await this.ciService.loadFailedWorkflowRuns(item.pr);
+        failedJobs = await this.ciService.loadFailedJobsWithErrors(item.pr, failedRuns);
+      }
+
+      return {
+        ...item,
+        checkRuns,
+        ciStatus: newCiStatus,
+        reviewStatus: newReviewStatus,
+        discussionStatus: newDiscussionStatus,
+        unseenCiFinish,
+        unseenApproval,
+        unseenDiscussions,
+        isMergeable: newCiStatus === 'success' && newReviewStatus === 'APPROVED' && !item.pr.draft,
+        failedRuns,
+        failedJobs,
+        isLoading: false,
+      };
+    } catch {
+      return { ...item, ciStatus: 'unknown', isLoading: false };
+    }
   }
 
   private async pollPrActivityForIndex(index: number): Promise<void> {
@@ -304,6 +555,7 @@ export class DashboardService {
       const approvalGranted = currentItem.reviewStatus !== 'APPROVED' && snapshot.reviewStatus === 'APPROVED';
       const newComment = this.hasNewExternalComment(currentItem, snapshot);
 
+<<<<<<< HEAD
       if (!headChanged && !ciFinished && !approvalGranted && !newComment) {
         return;
       }
@@ -312,6 +564,39 @@ export class DashboardService {
         notifyCiFinish: ciFinished,
         notifyApproval: approvalGranted,
         notifyComment: newComment,
+=======
+      let unseenApproval = oldItem.unseenApproval;
+      let unseenDiscussions = oldItem.unseenDiscussions;
+
+      // Check for approval change
+      if (oldItem.reviewStatus !== 'APPROVED' && newReviewStatus === 'APPROVED') {
+        unseenApproval = !isSelected;
+      }
+
+      // Check for new discussions
+      if (oldItem.discussionStatus !== 'NEW_CONTENT' && newDiscussionStatus === 'NEW_CONTENT') {
+        unseenDiscussions = !isSelected;
+      }
+
+      // If selected, always clear flags
+      if (isSelected) {
+        unseenApproval = false;
+        unseenDiscussions = false;
+      }
+
+      this._prList.update((list) => {
+        const updated = [...list];
+        updated[index] = {
+          ...updated[index],
+          reviewStatus: newReviewStatus,
+          discussionStatus: newDiscussionStatus,
+          unseenApproval,
+          unseenDiscussions,
+          isMergeable:
+            updated[index].ciStatus === 'success' && newReviewStatus === 'APPROVED' && !item.pr.draft,
+        };
+        return updated;
+>>>>>>> f5be03b (fix many prop)
       });
     } catch {
       // Background refresh failure is non-critical
@@ -380,6 +665,7 @@ export class DashboardService {
     return success;
   }
 
+<<<<<<< HEAD
   startAutoRefresh(pendingIntervalMs: number = 15000, activityIntervalMs: number = 60000): void {
     this.stopAutoRefresh();
     this.pendingRefreshInterval = setInterval(() => {
@@ -388,6 +674,12 @@ export class DashboardService {
     this.activityRefreshInterval = setInterval(() => {
       void this.refreshPrActivity();
     }, activityIntervalMs);
+=======
+  startAutoRefresh(pendingIntervalMs: number = 15000, syncIntervalMs: number = 60000): void {
+    this.stopAutoRefresh();
+    this.refreshInterval = setInterval(() => this.refreshPendingPrs(), pendingIntervalMs);
+    this.successRefreshInterval = setInterval(() => this.syncPullRequests(), syncIntervalMs);
+>>>>>>> f5be03b (fix many prop)
   }
 
   stopAutoRefresh(): void {
@@ -411,12 +703,83 @@ export class DashboardService {
     if (!item) return;
 
     try {
+<<<<<<< HEAD
       const snapshot = await this.loadActivitySnapshot(item.pr);
       await this.applyActivitySnapshot(index, item.pr, snapshot, {
         notifyCiFinish: false,
         notifyApproval: false,
         notifyComment: false,
         forceRefresh: true,
+=======
+      const repoFullName = item.pr.base.repo.full_name;
+      const [owner, repo] = repoFullName.split('/');
+
+      const [checkRuns, reviews, discussionStatusData] = await Promise.all([
+        this.ciService.loadCheckRuns(item.pr),
+        firstValueFrom(this.api.getReviews(owner, repo, item.pr.number)),
+        firstValueFrom(this.api.getPrDiscussionsStatus(owner, repo, item.pr.number)),
+      ]);
+
+      const oldItem = this._prList()[index];
+      const isSelected = this._selectedPrId() === oldItem.pr.id;
+
+      const newCiStatus = this.ciService.computeCIStatus(checkRuns);
+      const newDiscussionStatus = this.computeDiscussionStatus(discussionStatusData.unresolvedThreads);
+      const hasOpenDiscussions = newDiscussionStatus !== 'NONE';
+      const newReviewStatus = this.computeReviewStatus(reviews, hasOpenDiscussions);
+
+      let unseenCiFinish = oldItem.unseenCiFinish;
+      let unseenApproval = oldItem.unseenApproval;
+      let unseenDiscussions = oldItem.unseenDiscussions;
+
+      // Check for CI change
+      if (oldItem.ciStatus === 'pending' && (newCiStatus === 'success' || newCiStatus === 'failure')) {
+        unseenCiFinish = !isSelected;
+      }
+
+      // Check for approval change
+      if (oldItem.reviewStatus !== 'APPROVED' && newReviewStatus === 'APPROVED') {
+        unseenApproval = !isSelected;
+      }
+
+      // Check for new discussions
+      if (oldItem.discussionStatus !== 'NEW_CONTENT' && newDiscussionStatus === 'NEW_CONTENT') {
+        unseenDiscussions = !isSelected;
+      }
+
+      // If selected, always clear flags
+      if (isSelected) {
+        unseenCiFinish = false;
+        unseenApproval = false;
+        unseenDiscussions = false;
+      }
+
+      let failedRuns = item.failedRuns;
+      let failedJobs = item.failedJobs;
+
+      if (checkRuns.some(cr => cr.conclusion === 'failure')) {
+        failedRuns = await this.ciService.loadFailedWorkflowRuns(item.pr);
+        failedJobs = await this.ciService.loadFailedJobsWithErrors(item.pr, failedRuns);
+      }
+
+      this._prList.update((list) => {
+        const updated = [...list];
+        updated[index] = {
+          ...updated[index],
+          checkRuns,
+          ciStatus: newCiStatus,
+          reviewStatus: newReviewStatus,
+          discussionStatus: newDiscussionStatus,
+          unseenCiFinish,
+          unseenApproval,
+          unseenDiscussions,
+          isMergeable: newCiStatus === 'success' && newReviewStatus === 'APPROVED' && !item.pr.draft,
+          failedRuns,
+          failedJobs,
+          isLoading: false,
+        };
+        return updated;
+>>>>>>> f5be03b (fix many prop)
       });
     } catch {
       this._prList.update((list) => {

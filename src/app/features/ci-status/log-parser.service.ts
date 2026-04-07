@@ -14,11 +14,16 @@ export class LogParserService {
     owner: string,
     repo: string,
     jobId: number,
-  ): Promise<{ failures: ParsedTestFailure[]; logAccessible: boolean }> {
+  ): Promise<{ failures: ParsedTestFailure[]; logAccessible: boolean; nxCloudUrl?: string }> {
     try {
       const rawLog = await firstValueFrom(this.api.getJobLogs(owner, repo, jobId));
       const failures = this.parseTestFailuresFromLog(rawLog);
-      return { failures, logAccessible: true };
+
+      // Extract Nx Cloud URL
+      const nxMatch = rawLog.match(/https?:\/\/cloud\.nx\.app\/cipes\/[a-f0-9]+/i);
+      const nxCloudUrl = nxMatch ? nxMatch[0] : undefined;
+
+      return { failures, logAccessible: true, nxCloudUrl };
     } catch {
       return { failures: [], logAccessible: false };
     }

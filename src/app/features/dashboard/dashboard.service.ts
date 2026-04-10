@@ -149,7 +149,7 @@ export class DashboardService {
           const fullPr = await firstValueFrom(this.api.getPullRequest(owner, repo, prNumber));
           prWithStatuses.push({
             pr: fullPr,
-            ciStatus: 'pending',
+            ciStatus: 'unknown',
             reviewStatus: 'PENDING',
             isMergeable: false,
             discussionStatus: 'NONE',
@@ -176,7 +176,7 @@ export class DashboardService {
         this._selectedPrId.set(prWithStatuses[0].pr.id);
       }
 
-      await this.loadCIStatusForAll();
+      await this.loadCIStatusForAll(false);
       this.updateRateLimit();
     } catch (err: any) {
       const msg = err?.error?.message || err?.message || 'Failed to load pull requests.';
@@ -214,7 +214,7 @@ export class DashboardService {
       });
 
       // Reload Status (CI, Reviews, Discussions)
-      await this.loadCIStatusForIndex(index);
+      await this.loadCIStatusForIndex(index, false);
     } catch (err: any) {
       this._prList.update((list) => {
         const updated = [...list];
@@ -386,7 +386,7 @@ export class DashboardService {
           const fullPr = await firstValueFrom(this.api.getPullRequest(owner, repo, prNumber));
           updatedList.push({
             pr: fullPr,
-            ciStatus: 'pending',
+            ciStatus: 'unknown',
             reviewStatus: 'PENDING',
             isMergeable: false,
             discussionStatus: 'NONE',
@@ -406,7 +406,13 @@ export class DashboardService {
       updatedList.sort((a, b) => new Date(b.pr.updated_at).getTime() - new Date(a.pr.updated_at).getTime());
 
       // 3. Refresh status for ALL active PRs in parallel (in-memory)
-      const refreshedList = await Promise.all(updatedList.map(item => this.loadUpdatedPrStatus(item)));
+      // Determine if a PR is new (wasn't in currentMap) vs existing
+      const refreshedList = await Promise.all(
+        updatedList.map((item) => {
+          const isNew = !currentMap.has(item.pr.id);
+          return this.loadUpdatedPrStatus(item, !isNew);
+        }),
+      );
 
       // 4. Final Comparison for atomic update
       if (this.areListsEffectivelyDifferent(currentPrs, refreshedList)) {
@@ -466,7 +472,10 @@ export class DashboardService {
    * Fetch refreshed status for a PR without touching the signal.
    * Returns a NEW object with the latest status.
    */
-  private async loadUpdatedPrStatus(item: PullRequestWithStatus): Promise<PullRequestWithStatus> {
+  private async loadUpdatedPrStatus(
+    item: PullRequestWithStatus,
+    triggerNotifications = true,
+  ): Promise<PullRequestWithStatus> {
     try {
       const repoFullName = item.pr.base.repo.full_name;
       const [owner, repo] = repoFullName.split('/');
@@ -489,18 +498,34 @@ export class DashboardService {
       let unseenDiscussions = item.unseenDiscussions;
 
       // Check for CI change
-      if (item.ciStatus === 'pending' && (newCiStatus === 'success' || newCiStatus === 'failure')) {
+      if (
+        triggerNotifications &&
+        item.ciStatus !== 'unknown' &&
+        item.ciStatus !== newCiStatus &&
+        (newCiStatus === 'success' || newCiStatus === 'failure')
+      ) {
         unseenCiFinish = !isSelected;
+        if (unseenCiFinish) this.showNotification('CI Finished', `PR #${item.pr.number} is now ${newCiStatus}`);
       }
 
       // Check for approval change
-      if (item.reviewStatus !== 'APPROVED' && newReviewStatus === 'APPROVED') {
+      if (
+        triggerNotifications && 
+        item.reviewStatus !== 'APPROVED' && 
+        newReviewStatus === 'APPROVED'
+      ) {
         unseenApproval = !isSelected;
+        if (unseenApproval) this.showNotification('PR Approved', `PR #${item.pr.number} has been approved`);
       }
 
       // Check for new discussions
-      if (item.discussionStatus !== 'NEW_CONTENT' && newDiscussionStatus === 'NEW_CONTENT') {
+      if (
+        triggerNotifications &&
+        item.discussionStatus !== 'NEW_CONTENT' &&
+        newDiscussionStatus === 'NEW_CONTENT'
+      ) {
         unseenDiscussions = !isSelected;
+        if (unseenDiscussions) this.showNotification('New Message', `New unresolved discussion on PR #${item.pr.number}`);
       }
 
       // If selected, always clear flags
@@ -533,7 +558,9 @@ export class DashboardService {
         isLoading: false,
       };
     } catch {
-      return { ...item, ciStatus: 'unknown', isLoading: false };
+      // Preserve existing status on error rather than resetting to 'unknown'
+      // This prevents 'ghost' notifications when the next fetch succeeds
+      return { ...item, isLoading: false };
     }
   }
 
@@ -693,12 +720,12 @@ export class DashboardService {
     }
   }
 
-  private async loadCIStatusForAll(): Promise<void> {
+  private async loadCIStatusForAll(triggerNotifications = true): Promise<void> {
     const list = this._prList();
-    await Promise.allSettled(list.map((_, index) => this.loadCIStatusForIndex(index)));
+    await Promise.allSettled(list.map((_, index) => this.loadCIStatusForIndex(index, triggerNotifications)));
   }
 
-  private async loadCIStatusForIndex(index: number): Promise<void> {
+  private async loadCIStatusForIndex(index: number, triggerNotifications = true): Promise<void> {
     const item = this._prList()[index];
     if (!item) return;
 
@@ -733,18 +760,29 @@ export class DashboardService {
       let unseenDiscussions = oldItem.unseenDiscussions;
 
       // Check for CI change
-      if (oldItem.ciStatus === 'pending' && (newCiStatus === 'success' || newCiStatus === 'failure')) {
+      if (
+        triggerNotifications &&
+        oldItem.ciStatus !== newCiStatus &&
+        (newCiStatus === 'success' || newCiStatus === 'failure')
+      ) {
         unseenCiFinish = !isSelected;
+        if (unseenCiFinish) this.showNotification('CI Finished', `PR #${item.pr.number} is now ${newCiStatus}`);
       }
 
       // Check for approval change
-      if (oldItem.reviewStatus !== 'APPROVED' && newReviewStatus === 'APPROVED') {
+      if (triggerNotifications && oldItem.reviewStatus !== 'APPROVED' && newReviewStatus === 'APPROVED') {
         unseenApproval = !isSelected;
+        if (unseenApproval) this.showNotification('PR Approved', `PR #${item.pr.number} has been approved`);
       }
 
       // Check for new discussions
-      if (oldItem.discussionStatus !== 'NEW_CONTENT' && newDiscussionStatus === 'NEW_CONTENT') {
+      if (
+        triggerNotifications &&
+        oldItem.discussionStatus !== 'NEW_CONTENT' &&
+        newDiscussionStatus === 'NEW_CONTENT'
+      ) {
         unseenDiscussions = !isSelected;
+        if (unseenDiscussions) this.showNotification('New Message', `New unresolved discussion on PR #${item.pr.number}`);
       }
 
       // If selected, always clear flags
@@ -784,7 +822,9 @@ export class DashboardService {
     } catch {
       this._prList.update((list) => {
         const updated = [...list];
-        updated[index] = { ...updated[index], ciStatus: 'unknown', isLoading: false };
+        if (updated[index]) {
+          updated[index] = { ...updated[index], isLoading: false };
+        }
         return updated;
       });
     }
@@ -996,5 +1036,17 @@ export class DashboardService {
       return issueMatch ? parseInt(issueMatch[1], 10) : null;
     }
     return parseInt(match[1], 10);
+  }
+
+  private showNotification(title: string, body: string): void {
+    if ('Notification' in window && Notification.permission === 'granted') {
+      new Notification(title, { body });
+    } else if ('Notification' in window && Notification.permission !== 'denied') {
+      Notification.requestPermission().then((permission) => {
+        if (permission === 'granted') {
+          new Notification(title, { body });
+        }
+      });
+    }
   }
 }

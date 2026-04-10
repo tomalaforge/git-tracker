@@ -11,7 +11,7 @@ export class AuthService {
   private readonly githubApi = inject(GitHubApiService);
   private readonly router = inject(Router);
 
-  private readonly _token = signal<string | null>(this.loadToken());
+  private readonly _token = signal<string | null>(this.loadTokenFromLocalStorage());
   private readonly _user = signal<GitHubUser | null>(null);
   private readonly _isValidating = signal(false);
   private readonly _error = signal<string | null>(null);
@@ -23,9 +23,23 @@ export class AuthService {
   readonly isAuthenticated = computed(() => !!this._token() && !!this._user());
 
   constructor() {
-    // If we already have a stored token, validate it on startup
+    this.initialize();
+  }
+
+  private async initialize(): Promise<void> {
+    // 1. Check if we have a token in Electron storage (more robust)
+    const electronAPI = (window as any).electronAPI;
+    if (electronAPI?.loadToken) {
+      const persistentToken = await electronAPI.loadToken();
+      if (persistentToken && persistentToken !== this._token()) {
+        this._token.set(persistentToken);
+        this.saveTokenToLocalStorage(persistentToken);
+      }
+    }
+
+    // 2. If we have a token (from either source), validate it
     if (this._token()) {
-      this.validateToken();
+      await this.validateToken();
     }
   }
 
@@ -37,7 +51,7 @@ export class AuthService {
     try {
       const user = await firstValueFrom(this.githubApi.getAuthenticatedUser());
       this._user.set(user);
-      this.saveToken(token);
+      await this.saveToken(token);
       this._isValidating.set(false);
       return true;
     } catch (err: any) {
@@ -58,7 +72,7 @@ export class AuthService {
   async validateToken(): Promise<void> {
     this._isValidating.set(true);
     try {
-      // Timeout after 8 seconds to prevent permanent blocking
+      // Timeout after 10 seconds to prevent permanent blocking
       const userPromise = firstValueFrom(this.githubApi.getAuthenticatedUser());
       const timeoutPromise = new Promise((_, reject) => 
         setTimeout(() => reject(new Error('Validation timeout')), 10000)
@@ -68,13 +82,18 @@ export class AuthService {
       this._user.set(user);
     } catch (err: any) {
       console.error('Validation failed', err);
-      this.logout();
+      // Only logout if it's a definitive authentication error (401)
+      if (err?.status === 401) {
+        this.logout();
+      }
+      // If it's a network error or timeout, we keep the token and the user
+      // has to manually logout or wait for a successful refresh later.
     } finally {
       this._isValidating.set(false);
     }
   }
 
-  private loadToken(): string | null {
+  private loadTokenFromLocalStorage(): string | null {
     try {
       return localStorage.getItem(TOKEN_KEY);
     } catch {
@@ -82,7 +101,7 @@ export class AuthService {
     }
   }
 
-  private saveToken(token: string): void {
+  private saveTokenToLocalStorage(token: string): void {
     try {
       localStorage.setItem(TOKEN_KEY, token);
     } catch {
@@ -90,11 +109,25 @@ export class AuthService {
     }
   }
 
-  private clearToken(): void {
+  private async saveToken(token: string): Promise<void> {
+    // Save to localStorage
+    this.saveTokenToLocalStorage(token);
+
+    // Save to Electron storage (async)
+    const electronAPI = (window as any).electronAPI;
+    if (electronAPI?.saveToken) {
+      await electronAPI.saveToken(token);
+    }
+  }
+
+  private async clearToken(): Promise<void> {
     try {
       localStorage.removeItem(TOKEN_KEY);
-    } catch {
-      // silently fail
+    } catch { /* ignore */ }
+
+    const electronAPI = (window as any).electronAPI;
+    if (electronAPI?.clearToken) {
+      await electronAPI.clearToken();
     }
   }
 }

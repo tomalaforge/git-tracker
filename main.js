@@ -60,9 +60,47 @@ app.on('activate', () => {
   }
 });
 
+const fs = require('fs');
+
 // IPC handlers for badge support
 ipcMain.on('set-badge-count', (event, count) => {
   if (process.platform === 'darwin') {
     app.setBadgeCount(count);
+  }
+});
+
+// IPC handlers for token persistence
+const tokenPath = path.join(app.getPath('userData'), 'github_token.txt');
+
+ipcMain.handle('save-token', (event, token) => {
+  try {
+    fs.writeFileSync(tokenPath, token, 'utf-8');
+    return true;
+  } catch (err) {
+    console.error('Failed to save token', err);
+    return false;
+  }
+});
+
+ipcMain.handle('load-token', () => {
+  try {
+    if (fs.existsSync(tokenPath)) {
+      return fs.readFileSync(tokenPath, 'utf-8');
+    }
+  } catch (err) {
+    console.error('Failed to load token', err);
+  }
+  return null;
+});
+
+ipcMain.handle('clear-token', () => {
+  try {
+    if (fs.existsSync(tokenPath)) {
+      fs.unlinkSync(tokenPath);
+    }
+    return true;
+  } catch (err) {
+    console.error('Failed to clear token', err);
+    return false;
   }
 });

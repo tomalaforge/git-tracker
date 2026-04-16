@@ -151,8 +151,14 @@ import { AuthService } from '../auth';
             <div class="shrink-0 px-4 py-2.5 border-b border-border-glass flex flex-col gap-2">
               <div class="flex items-center justify-between">
                 <span class="text-xs font-semibold text-text-secondary uppercase tracking-wider">Pull Requests</span>
-                @if (dashboard.stats().pending > 0) {
-                  <span class="text-[10px] text-pending animate-pulse-slow">● auto-refreshing</span>
+                @if (dashboard.prList().length > 0) {
+                  <span class="text-[10px] text-pending animate-pulse-slow">
+                    @if (dashboard.stats().pending > 0) {
+                      ● running: 15s · others: 60s
+                    } @else {
+                      ● checks every minute
+                    }
+                  </span>
                 }
               </div>
               <!-- Author filter -->

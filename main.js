@@ -63,6 +63,6 @@ app.on('activate', () => {
 // IPC handlers for badge support
 ipcMain.on('set-badge-count', (event, count) => {
   if (process.platform === 'darwin') {
-    app.badgeCount = count;
+    app.setBadgeCount(count);
   }
 });

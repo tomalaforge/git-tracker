@@ -11,12 +11,29 @@ import { CiBadgeComponent } from '../ci-status/ci-badge';
 import { GitHubApiService } from '../../core';
 import { firstValueFrom } from 'rxjs';
 
+interface ReviewThreadComment {
+  id: number;
+  body: string;
+  path: string;
+  line: number | null;
+  original_line: number | null;
+  diff_hunk: string | null;
+  created_at: string;
+  updated_at: string;
+  user: {
+    login: string;
+    avatar_url: string;
+  };
+}
+
 interface ReviewThread {
+  id: string;
   rootId: number;
+  isResolved: boolean;
   path: string;
   line: number | null;
   diffHunk: string | null;
-  comments: any[];
+  comments: ReviewThreadComment[];
 }
 
 @Component({
@@ -326,7 +343,7 @@ interface ReviewThread {
               [class.bg-bg-glass]="activeTab() !== 'conversations'"
               [class.text-text-muted]="activeTab() !== 'conversations'"
             >
-              {{ reviewComments().length }} / {{ totalComments() }}
+              {{ reviewCommentCount() }} / {{ totalComments() }}
             </span>
           }
         </button>
@@ -418,220 +435,275 @@ interface ReviewThread {
           </div>
         } @else if (activeTab() === 'conversations') {
           <!-- Conversations tab -->
-          <div class="flex flex-col h-full">
-            @if (isLoadingConversations() && reviewThreads().length === 0 && prComments().length === 0) {
+          <div class="flex flex-col h-full bg-bg-primary/30">
+            @if (
+              isLoadingConversations() &&
+              unresolvedReviewThreads().length === 0 &&
+              resolvedReviewThreads().length === 0 &&
+              prComments().length === 0
+            ) {
               <div class="p-6 space-y-3">
                 @for (i of [1, 2, 3]; track i) {
                   <div
-                    class="bg-bg-glass border border-border-glass rounded-xl p-4 animate-pulse-slow"
+                    class="bg-bg-card border border-border-glass rounded-xl p-4 animate-pulse-slow"
                   >
-                    <div class="h-3 bg-bg-card rounded w-1/4 mb-3"></div>
-                    <div class="h-3 bg-bg-card rounded w-3/4 mb-2"></div>
-                    <div class="h-3 bg-bg-card rounded w-1/2"></div>
+                    <div class="h-3 bg-bg-glass rounded w-1/5 mb-3"></div>
+                    <div class="h-10 bg-bg-glass rounded-lg w-full mb-2"></div>
+                    <div class="h-10 bg-bg-glass rounded-lg w-[92%] ml-10"></div>
                   </div>
                 }
               </div>
             } @else {
-              <div class="flex-1 overflow-y-auto p-4 space-y-6">
-                <!-- Review comment threads grouped by file -->
-                @if (reviewThreads().length > 0) {
-                  <div>
-                    <p
-                      class="text-[10px] text-text-muted font-semibold uppercase tracking-wider mb-3"
+              <div class="shrink-0 border-b border-border-glass bg-bg-card/70 px-5 py-4">
+                <div class="flex flex-wrap gap-2">
+                  <div class="rounded-full border border-danger-border/40 bg-danger-bg/20 px-3 py-1">
+                    <span class="text-[11px] font-semibold text-danger"
+                      >{{ unresolvedReviewThreads().length }} unresolved</span
                     >
-                      Review Comments ({{ reviewComments().length }})
-                    </p>
+                  </div>
+                  <div class="rounded-full border border-border-glass bg-bg-glass px-3 py-1">
+                    <span class="text-[11px] font-semibold text-text-secondary"
+                      >{{ prComments().length }} general comment{{ prComments().length !== 1 ? 's' : '' }}</span
+                    >
+                  </div>
+                  <div class="rounded-full border border-success-border/40 bg-success-bg/15 px-3 py-1">
+                    <span class="text-[11px] font-semibold text-success"
+                      >{{ resolvedReviewThreads().length }} resolved</span
+                    >
+                  </div>
+                </div>
+              </div>
+
+              <div class="flex-1 overflow-y-auto px-5 py-5 space-y-6">
+                @if (unresolvedReviewThreads().length > 0) {
+                  <section class="space-y-4">
+                    <div class="flex items-center justify-between">
+                      <div>
+                        <h3 class="text-sm font-semibold text-text-primary">Unresolved conversations</h3>
+                        <p class="text-xs text-text-muted mt-1">
+                          Open feedback that still needs attention.
+                        </p>
+                      </div>
+                      <span class="text-xs text-danger font-medium">
+                        {{ unresolvedReviewThreads().length }} open
+                      </span>
+                    </div>
+
                     <div class="space-y-4">
-                      @for (thread of reviewThreads(); track thread.rootId) {
-                        <div
-                          class="bg-bg-glass border border-border-glass rounded-xl overflow-hidden"
-                        >
-                          <!-- File path header -->
-                          <div
-                            class="flex items-center justify-between px-3 py-2 bg-bg-primary/50 border-b border-border-glass"
-                          >
-                            <div class="flex items-center gap-2 min-w-0">
-                              <svg
-                                class="w-3.5 h-3.5 text-text-muted shrink-0"
-                                fill="currentColor"
-                                viewBox="0 0 20 20"
-                              >
-                                <path
-                                  fill-rule="evenodd"
-                                  d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"
-                                  clip-rule="evenodd"
-                                />
+                      @for (thread of unresolvedReviewThreads(); track thread.id) {
+                        <div class="rounded-xl border border-border-glass bg-bg-card shadow-[0_1px_0_rgba(255,255,255,0.03)] overflow-hidden">
+                          <div class="flex items-center justify-between gap-3 px-4 py-3 bg-bg-glass border-b border-border-glass">
+                            <div class="min-w-0 flex items-center gap-2">
+                              <svg class="w-4 h-4 text-text-muted shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clip-rule="evenodd" />
                               </svg>
-                              <span class="text-[11px] font-mono text-text-secondary truncate">{{
-                                thread.path
-                              }}</span>
+                              <span class="truncate text-xs font-semibold text-text-primary font-mono">
+                                {{ thread.path }}
+                              </span>
                               @if (thread.line) {
-                                <span class="text-[10px] text-text-muted shrink-0"
-                                  >:{{ thread.line }}</span
-                                >
+                                <span class="text-[11px] text-text-muted shrink-0">#L{{ thread.line }}</span>
                               }
                             </div>
-                            <button
-                              (click)="copyFileName(thread.path)"
-                              class="p-1 rounded text-text-muted hover:text-accent transition-colors cursor-pointer shrink-0"
-                              [title]="
-                                copiedFileName() === thread.path ? 'Copied!' : 'Copy filename'
-                              "
-                            >
-                              @if (copiedFileName() === thread.path) {
-                                <svg
-                                  class="w-3.5 h-3.5 text-success"
-                                  fill="currentColor"
-                                  viewBox="0 0 20 20"
-                                >
-                                  <path
-                                    fill-rule="evenodd"
-                                    d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                                    clip-rule="evenodd"
-                                  />
+                            <div class="flex items-center gap-2 shrink-0">
+                              <span class="rounded-full border border-danger-border/50 bg-danger-bg/20 px-2 py-0.5 text-[10px] font-semibold text-danger">
+                                Unresolved
+                              </span>
+                              <button
+                                (click)="copyFileName(thread.path)"
+                                class="p-1 rounded text-text-muted hover:text-accent transition-colors cursor-pointer"
+                                [title]="copiedFileName() === thread.path ? 'Copied!' : 'Copy filename'"
+                              >
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2" />
                                 </svg>
-                              } @else {
-                                <svg
-                                  class="w-3.5 h-3.5"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  viewBox="0 0 24 24"
-                                >
-                                  <path
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                    stroke-width="2"
-                                    d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2"
-                                  />
-                                </svg>
-                              }
-                            </button>
+                              </button>
+                            </div>
                           </div>
-                          <!-- Diff hunk -->
+
                           @if (thread.diffHunk) {
-                            <pre
-                              class="px-3 py-2 text-[10px] font-mono text-text-muted bg-bg-primary/30 border-b border-border-glass overflow-x-auto whitespace-pre leading-relaxed max-h-28 overflow-y-auto"
-                              >{{ thread.diffHunk }}</pre
-                            >
+                            <pre class="border-b border-border-glass bg-bg-primary/70 px-4 py-3 text-[11px] font-mono text-text-muted overflow-x-auto whitespace-pre-wrap leading-relaxed">{{ thread.diffHunk }}</pre>
                           }
-                          <!-- Comments in thread -->
-                          <div class="divide-y divide-border-glass">
+
+                          <div class="p-4 space-y-3">
                             @for (comment of thread.comments; track comment.id) {
-                              <div class="px-3 py-3">
-                                <div class="flex items-center gap-2 mb-1.5">
-                                  <img
-                                    [src]="comment.user.avatar_url"
-                                    [alt]="comment.user.login"
-                                    class="w-5 h-5 rounded-full shrink-0"
-                                  />
-                                  <span class="text-xs font-semibold text-text-primary">{{
-                                    comment.user.login
-                                  }}</span>
-                                  <span class="text-[10px] text-text-muted ml-auto">{{
-                                    comment.created_at | date: 'MMM d, HH:mm'
-                                  }}</span>
-                                </div>
-                                <div
-                                  class="text-xs text-text-secondary leading-relaxed whitespace-pre-wrap pl-7"
-                                >
-                                  {{ comment.body }}
+                              <div class="flex items-start gap-3">
+                                <img [src]="comment.user.avatar_url" [alt]="comment.user.login" class="w-8 h-8 rounded-full border border-border-glass shrink-0" />
+                                <div class="min-w-0 flex-1 rounded-xl border border-border-glass bg-bg-primary/70 overflow-hidden">
+                                  <div class="flex items-center gap-2 px-3 py-2 bg-bg-glass border-b border-border-glass">
+                                    <span class="text-xs font-semibold text-text-primary">{{ comment.user.login }}</span>
+                                    <span class="text-[11px] text-text-muted">
+                                      commented {{ comment.created_at | date: 'MMM d, HH:mm' }}
+                                    </span>
+                                  </div>
+                                  <div class="px-3 py-3 text-sm text-text-secondary leading-6 whitespace-pre-wrap break-words">
+                                    {{ comment.body }}
+                                  </div>
                                 </div>
                               </div>
                             }
                           </div>
-                          <!-- Reply to thread -->
+
                           @if (replyingTo() === thread.rootId) {
-                            <div class="p-3 border-t border-border-glass bg-bg-primary/20">
-                              <textarea
-                                [(ngModel)]="replyText"
-                                placeholder="Write a reply…"
-                                rows="3"
-                                class="w-full text-xs bg-bg-primary border border-border-glass rounded-lg px-3 py-2 text-text-primary placeholder-text-muted resize-none focus:outline-none focus:border-accent transition-colors"
-                              ></textarea>
-                              <div class="flex justify-end gap-2 mt-2">
+                            <div class="border-t border-border-glass bg-bg-primary/50 p-4">
+                              <div class="rounded-xl border border-border-glass bg-bg-card overflow-hidden">
+                                <div class="px-3 py-2 border-b border-border-glass bg-bg-glass text-[11px] font-medium text-text-secondary">
+                                  Reply to conversation
+                                </div>
+                                <textarea
+                                  [(ngModel)]="replyText"
+                                  placeholder="Add your reply"
+                                  rows="4"
+                                  class="w-full bg-transparent px-3 py-3 text-sm text-text-primary placeholder-text-muted resize-none focus:outline-none"
+                                ></textarea>
+                              </div>
+                              <div class="mt-3 flex justify-end gap-2">
                                 <button
                                   (click)="replyingTo.set(null)"
-                                  class="px-3 py-1 text-xs text-text-muted hover:text-text-primary transition-colors cursor-pointer"
+                                  class="px-3 py-1.5 text-xs font-medium text-text-secondary border border-border-glass rounded-lg hover:bg-bg-glass transition-colors cursor-pointer"
                                 >
                                   Cancel
                                 </button>
                                 <button
                                   (click)="submitReply(thread.rootId, thread.path)"
-                                  [disabled]="isSubmitting()"
-                                  class="px-3 py-1 text-xs font-medium bg-accent text-white rounded-lg hover:bg-accent/90 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                                  [disabled]="isSubmitting() || !replyText.trim()"
+                                  class="px-3 py-1.5 text-xs font-medium bg-accent text-white rounded-lg hover:bg-accent/90 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                   {{ isSubmitting() ? 'Sending…' : 'Reply' }}
                                 </button>
                               </div>
                             </div>
                           } @else {
-                            <div class="px-3 py-2 border-t border-border-glass">
+                            <div class="border-t border-border-glass bg-bg-primary/30 px-4 py-3">
                               <button
                                 (click)="replyingTo.set(thread.rootId)"
-                                class="text-[11px] text-text-muted hover:text-accent transition-colors cursor-pointer"
+                                class="text-xs font-medium text-text-secondary hover:text-accent transition-colors cursor-pointer"
                               >
-                                ↩ Reply
+                                Reply
                               </button>
                             </div>
                           }
                         </div>
                       }
                     </div>
-                  </div>
+                  </section>
+                } @else if (resolvedReviewThreads().length > 0) {
+                  <section class="rounded-xl border border-border-glass bg-bg-card px-4 py-5 text-center">
+                    <p class="text-sm font-medium text-text-primary">All review threads are resolved.</p>
+                    <p class="text-xs text-text-muted mt-1">Open the resolved section below if you want to inspect them again.</p>
+                  </section>
                 }
 
-                <!-- General PR comments -->
                 @if (prComments().length > 0) {
-                  <div>
-                    <p
-                      class="text-[10px] text-text-muted font-semibold uppercase tracking-wider mb-3"
-                    >
-                      Discussion ({{ prComments().length }})
-                    </p>
-                    <div class="space-y-2">
+                  <section class="space-y-4">
+                    <div>
+                      <h3 class="text-sm font-semibold text-text-primary">Conversation timeline</h3>
+                      <p class="text-xs text-text-muted mt-1">General pull request discussion, separated from file-specific review threads.</p>
+                    </div>
+
+                    <div class="space-y-3">
                       @for (comment of prComments(); track comment.id) {
-                        <div class="bg-bg-glass border border-border-glass rounded-xl px-4 py-3">
-                          <div class="flex items-center gap-2 mb-1.5">
-                            <img
-                              [src]="comment.user.avatar_url"
-                              [alt]="comment.user.login"
-                              class="w-5 h-5 rounded-full shrink-0"
-                            />
-                            <span class="text-xs font-semibold text-text-primary">{{
-                              comment.user.login
-                            }}</span>
-                            <span class="text-[10px] text-text-muted ml-auto">{{
-                              comment.created_at | date: 'MMM d, HH:mm'
-                            }}</span>
-                          </div>
-                          <div
-                            class="text-xs text-text-secondary leading-relaxed whitespace-pre-wrap pl-7"
-                          >
-                            {{ comment.body }}
+                        <div class="flex items-start gap-3">
+                          <img [src]="comment.user.avatar_url" [alt]="comment.user.login" class="w-8 h-8 rounded-full border border-border-glass shrink-0" />
+                          <div class="min-w-0 flex-1 rounded-xl border border-border-glass bg-bg-card overflow-hidden">
+                            <div class="flex items-center gap-2 px-3 py-2 bg-bg-glass border-b border-border-glass">
+                              <span class="text-xs font-semibold text-text-primary">{{ comment.user.login }}</span>
+                              <span class="text-[11px] text-text-muted">
+                                commented {{ comment.created_at | date: 'MMM d, HH:mm' }}
+                              </span>
+                            </div>
+                            <div class="px-3 py-3 text-sm text-text-secondary leading-6 whitespace-pre-wrap break-words">
+                              {{ comment.body }}
+                            </div>
                           </div>
                         </div>
                       }
                     </div>
-                  </div>
+                  </section>
                 }
 
-                @if (reviewThreads().length === 0 && prComments().length === 0) {
-                  <div class="text-center py-16">
-                    <div
-                      class="inline-flex items-center justify-center w-12 h-12 rounded-full bg-bg-glass border border-border-glass mb-3"
+                @if (resolvedReviewThreads().length > 0) {
+                  <section class="rounded-xl border border-border-glass bg-bg-card overflow-hidden">
+                    <button
+                      (click)="showResolvedThreads.set(!showResolvedThreads())"
+                      class="w-full flex items-center justify-between px-4 py-3 bg-bg-glass hover:bg-bg-primary/60 transition-colors cursor-pointer"
                     >
-                      <svg
-                        class="w-5 h-5 text-text-muted"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          stroke-width="2"
-                          d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-                        />
+                      <div class="text-left">
+                        <h3 class="text-sm font-semibold text-text-primary">Resolved conversations</h3>
+                        <p class="text-xs text-text-muted mt-1">
+                          Hidden by default, like GitHub review threads.
+                        </p>
+                      </div>
+                      <div class="flex items-center gap-3 shrink-0">
+                        <span class="text-xs text-success font-medium">
+                          {{ resolvedReviewThreads().length }} resolved
+                        </span>
+                        <svg
+                          class="w-4 h-4 text-text-muted transition-transform"
+                          [class.rotate-180]="showResolvedThreads()"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </div>
+                    </button>
+
+                    @if (showResolvedThreads()) {
+                      <div class="border-t border-border-glass px-4 py-4 space-y-4">
+                        @for (thread of resolvedReviewThreads(); track thread.id) {
+                          <div class="rounded-xl border border-border-glass bg-bg-primary/50 overflow-hidden">
+                            <div class="flex items-center justify-between gap-3 px-4 py-3 bg-bg-glass border-b border-border-glass">
+                              <div class="min-w-0 flex items-center gap-2">
+                                <svg class="w-4 h-4 text-text-muted shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                  <path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clip-rule="evenodd" />
+                                </svg>
+                                <span class="truncate text-xs font-semibold text-text-primary font-mono">
+                                  {{ thread.path }}
+                                </span>
+                                @if (thread.line) {
+                                  <span class="text-[11px] text-text-muted shrink-0">#L{{ thread.line }}</span>
+                                }
+                              </div>
+                              <span class="rounded-full border border-success-border/50 bg-success-bg/15 px-2 py-0.5 text-[10px] font-semibold text-success">
+                                Resolved
+                              </span>
+                            </div>
+
+                            <div class="p-4 space-y-3">
+                              @for (comment of thread.comments; track comment.id) {
+                                <div class="flex items-start gap-3 opacity-90">
+                                  <img [src]="comment.user.avatar_url" [alt]="comment.user.login" class="w-8 h-8 rounded-full border border-border-glass shrink-0" />
+                                  <div class="min-w-0 flex-1 rounded-xl border border-border-glass bg-bg-card overflow-hidden">
+                                    <div class="flex items-center gap-2 px-3 py-2 bg-bg-glass border-b border-border-glass">
+                                      <span class="text-xs font-semibold text-text-primary">{{ comment.user.login }}</span>
+                                      <span class="text-[11px] text-text-muted">
+                                        commented {{ comment.created_at | date: 'MMM d, HH:mm' }}
+                                      </span>
+                                    </div>
+                                    <div class="px-3 py-3 text-sm text-text-secondary leading-6 whitespace-pre-wrap break-words">
+                                      {{ comment.body }}
+                                    </div>
+                                  </div>
+                                </div>
+                              }
+                            </div>
+                          </div>
+                        }
+                      </div>
+                    }
+                  </section>
+                }
+
+                @if (
+                  unresolvedReviewThreads().length === 0 &&
+                  resolvedReviewThreads().length === 0 &&
+                  prComments().length === 0
+                ) {
+                  <div class="text-center py-16">
+                    <div class="inline-flex items-center justify-center w-12 h-12 rounded-full bg-bg-glass border border-border-glass mb-3">
+                      <svg class="w-5 h-5 text-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                       </svg>
                     </div>
                     <p class="text-sm text-text-muted">No conversations yet</p>
@@ -639,28 +711,32 @@ interface ReviewThread {
                 }
               </div>
 
-              <!-- New general comment box -->
-              <div class="shrink-0 border-t border-border-glass p-4 bg-bg-primary/30">
+              <div class="shrink-0 border-t border-border-glass bg-bg-card/70 px-5 py-4">
                 @if (!showCommentBox) {
                   <div class="flex justify-end">
                     <button
                       (click)="showCommentBox = true"
-                      class="px-4 py-1.5 text-xs font-medium border border-border-glass text-text-secondary rounded-lg hover:bg-bg-secondary transition-all cursor-pointer"
+                      class="px-4 py-1.5 text-xs font-medium border border-border-glass text-text-secondary rounded-lg hover:bg-bg-glass transition-all cursor-pointer"
                     >
-                      Add a comment
+                      Add to conversation
                     </button>
                   </div>
                 } @else {
-                  <textarea
-                    [(ngModel)]="newCommentText"
-                    placeholder="Leave a comment…"
-                    rows="3"
-                    class="w-full text-xs bg-bg-primary border border-border-glass rounded-lg px-3 py-2 text-text-primary placeholder-text-muted resize-none focus:outline-none focus:border-accent transition-colors mb-2"
-                  ></textarea>
-                  <div class="flex justify-end gap-2">
+                  <div class="rounded-xl border border-border-glass bg-bg-card overflow-hidden">
+                    <div class="px-3 py-2 border-b border-border-glass bg-bg-glass text-[11px] font-medium text-text-secondary">
+                      Comment on this pull request
+                    </div>
+                    <textarea
+                      [(ngModel)]="newCommentText"
+                      placeholder="Leave a comment"
+                      rows="4"
+                      class="w-full bg-transparent px-3 py-3 text-sm text-text-primary placeholder-text-muted resize-none focus:outline-none"
+                    ></textarea>
+                  </div>
+                  <div class="mt-3 flex justify-end gap-2">
                     <button
                       (click)="showCommentBox = false; newCommentText = ''"
-                      class="px-4 py-1.5 text-xs font-medium border border-border-glass text-text-secondary rounded-lg hover:bg-bg-secondary transition-all cursor-pointer"
+                      class="px-4 py-1.5 text-xs font-medium border border-border-glass text-text-secondary rounded-lg hover:bg-bg-glass transition-all cursor-pointer"
                     >
                       Cancel
                     </button>
@@ -757,7 +833,7 @@ interface ReviewThread {
                 </svg>
               </div>
               <h3 class="text-lg font-semibold text-pending mb-1">Checks running</h3>
-              <p class="text-sm text-text-muted">Auto-refreshing every 15 seconds…</p>
+              <p class="text-sm text-text-muted">Pending checks are polled every 15 seconds.</p>
 
               <div class="space-y-2 mt-6 text-left">
                 @for (check of pr().checkRuns; track check.id) {
@@ -837,9 +913,13 @@ interface ReviewThread {
                 </h3>
                 <button
                   (click)="rerunAllFailed.emit()"
+                  [disabled]="!isCiComplete()"
+                  [title]="rerunTooltip()"
                   class="px-3 py-1.5 text-xs font-medium bg-gradient-to-r from-amber-500 to-orange-600 text-white
                        rounded-lg hover:from-amber-600 hover:to-orange-700 active:scale-95
-                       transition-all shadow-lg shadow-amber-500/20 cursor-pointer flex items-center gap-1.5"
+                       transition-all shadow-lg shadow-amber-500/20 cursor-pointer flex items-center gap-1.5
+                       disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:from-amber-500
+                       disabled:hover:to-orange-600 disabled:active:scale-100"
                 >
                   <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path
@@ -895,8 +975,12 @@ interface ReviewThread {
                           (click)="
                             rerunJob.emit({ runId: item.runId, repoFullName: item.repoFullName })
                           "
+                          [disabled]="!isCiComplete()"
+                          [title]="rerunTooltip()"
                           class="px-2 py-1 text-[11px] font-medium text-warning bg-warning-bg border border-warning-border
-                               rounded-md hover:bg-warning/10 transition-all cursor-pointer active:scale-95"
+                               rounded-md hover:bg-warning/10 transition-all cursor-pointer active:scale-95
+                               disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-warning-bg
+                               disabled:active:scale-100"
                         >
                           ↻ Rerun
                         </button>
@@ -1239,11 +1323,12 @@ export class PrDetailComponent {
 
   // Conversations state
   readonly prComments = signal<any[]>([]);
-  readonly reviewComments = signal<any[]>([]);
+  readonly reviewThreadsData = signal<ReviewThread[]>([]);
   readonly isLoadingConversations = signal(false);
   readonly replyingTo = signal<number | null>(null);
   readonly copiedFileName = signal<string | null>(null);
   readonly isSubmitting = signal(false);
+  readonly showResolvedThreads = signal(false);
 
   replyText = '';
   newCommentText = '';
@@ -1257,19 +1342,25 @@ export class PrDetailComponent {
   editTitle = '';
   editBody = '';
 
-  readonly totalComments = computed(() => this.prComments().length + this.reviewComments().length);
+  readonly reviewCommentCount = computed(() =>
+    this.reviewThreadsData().reduce((total, thread) => total + thread.comments.length, 0),
+  );
+  readonly totalComments = computed(() => this.prComments().length + this.reviewCommentCount());
+  readonly isCiComplete = computed(() =>
+    this.pr().checkRuns.every((check) => check.status !== 'in_progress' && check.status !== 'queued'),
+  );
+  readonly rerunTooltip = computed(() =>
+    this.isCiComplete()
+      ? 'Rerun failed jobs'
+      : 'Wait for all running checks to finish before rerunning failed jobs',
+  );
 
-  readonly reviewThreads = computed((): ReviewThread[] => {
-    const all = this.reviewComments();
-    const roots = all.filter((c) => !c.in_reply_to_id);
-    return roots.map((root) => ({
-      rootId: root.id,
-      path: root.path,
-      line: root.line ?? root.original_line ?? null,
-      diffHunk: root.diff_hunk ?? null,
-      comments: all.filter((c) => c.id === root.id || c.in_reply_to_id === root.id),
-    }));
-  });
+  readonly unresolvedReviewThreads = computed(() =>
+    this.sortThreads(this.reviewThreadsData().filter((thread) => !thread.isResolved)),
+  );
+  readonly resolvedReviewThreads = computed(() =>
+    this.sortThreads(this.reviewThreadsData().filter((thread) => thread.isResolved)),
+  );
 
   readonly passingChecks = computed(() =>
     this.pr().checkRuns.filter(
@@ -1287,8 +1378,9 @@ export class PrDetailComponent {
       if (this.lastPrId !== currentPrId) {
         this.conversationsLoaded = false;
         this.prComments.set([]);
-        this.reviewComments.set([]);
+        this.reviewThreadsData.set([]);
         this.replyingTo.set(null);
+        this.showResolvedThreads.set(false);
         this.replyText = '';
         this.newCommentText = '';
         this.activeTab.set('ci');
@@ -1322,12 +1414,12 @@ export class PrDetailComponent {
     const repo = base.repo.name;
     this.isLoadingConversations.set(true);
     try {
-      const [comments, reviewComments] = await Promise.all([
+      const [comments, reviewThreads] = await Promise.all([
         firstValueFrom(this.api.getPrComments(owner, repo, number)),
-        firstValueFrom(this.api.getPrReviewComments(owner, repo, number)),
+        firstValueFrom(this.api.getPrReviewThreads(owner, repo, number)),
       ]);
       this.prComments.set(comments);
-      this.reviewComments.set(reviewComments);
+      this.reviewThreadsData.set(reviewThreads);
       this.conversationsLoaded = true;
     } finally {
       this.isLoadingConversations.set(false);
@@ -1342,10 +1434,8 @@ export class PrDetailComponent {
     const repo = base.repo.name;
     this.isSubmitting.set(true);
     try {
-      const newComment = await firstValueFrom(
-        this.api.replyToReviewComment(owner, repo, number, threadRootId, body),
-      );
-      this.reviewComments.update((list) => [...list, newComment]);
+      await firstValueFrom(this.api.replyToReviewComment(owner, repo, number, threadRootId, body));
+      await this.loadConversations();
       this.replyText = '';
       this.replyingTo.set(null);
     } finally {
@@ -1361,8 +1451,8 @@ export class PrDetailComponent {
     const repo = base.repo.name;
     this.isSubmitting.set(true);
     try {
-      const newComment = await firstValueFrom(this.api.createPrComment(owner, repo, number, body));
-      this.prComments.update((list) => [...list, newComment]);
+      await firstValueFrom(this.api.createPrComment(owner, repo, number, body));
+      await this.loadConversations();
       this.newCommentText = '';
       this.showCommentBox = false;
     } finally {
@@ -1381,6 +1471,14 @@ export class PrDetailComponent {
     } finally {
       this.isSavingDetails.set(false);
     }
+  }
+
+  private sortThreads(threads: ReviewThread[]): ReviewThread[] {
+    return [...threads].sort((a, b) => this.threadLastTimestamp(b).localeCompare(this.threadLastTimestamp(a)));
+  }
+
+  private threadLastTimestamp(thread: ReviewThread): string {
+    return thread.comments[thread.comments.length - 1]?.updated_at ?? thread.comments[0]?.created_at ?? '';
   }
 
   copyFileName(path: string): void {

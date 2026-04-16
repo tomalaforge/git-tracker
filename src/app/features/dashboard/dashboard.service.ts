@@ -2,8 +2,19 @@ import { Injectable, inject, signal, computed, effect } from '@angular/core';
 import { GitHubApiService } from '../../core';
 import { CiStatusService } from '../ci-status';
 import { AuthService } from '../auth';
-import { PullRequestWithStatus, ReviewStatus } from '../../models';
+import { CIStatus, CheckRun, PullRequest, PullRequestWithStatus, ReviewStatus } from '../../models';
 import { firstValueFrom } from 'rxjs';
+
+type DiscussionStatus = PullRequestWithStatus['discussionStatus'];
+
+interface PrActivitySnapshot {
+  checkRuns: CheckRun[];
+  ciStatus: CIStatus;
+  reviewStatus: ReviewStatus;
+  discussionStatus: DiscussionStatus;
+  latestCommentFingerprint: string | null;
+  latestCommentAuthor: string | null;
+}
 
 @Injectable({ providedIn: 'root' })
 export class DashboardService {
@@ -45,10 +56,12 @@ export class DashboardService {
     };
   });
 
-  private refreshInterval: ReturnType<typeof setInterval> | null = null;
-  private successRefreshInterval: ReturnType<typeof setInterval> | null = null;
+  private pendingRefreshInterval: ReturnType<typeof setInterval> | null = null;
+  private activityRefreshInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
+    this.requestNotificationPermission();
+
     effect(() => {
       const list = this._prList();
       const count = list.filter((p) => p.unseenDiscussions || p.unseenApproval || p.unseenCiFinish).length;
@@ -57,6 +70,14 @@ export class DashboardService {
         electronAPI.setBadgeCount(count);
       }
     });
+  }
+
+  private requestNotificationPermission(): void {
+    if (typeof Notification === 'undefined' || Notification.permission !== 'default') {
+      return;
+    }
+
+    void Notification.requestPermission().catch(() => undefined);
   }
 
   selectPr(prId: number): void {
@@ -114,6 +135,7 @@ export class DashboardService {
             reviewStatus: 'PENDING',
             isMergeable: false,
             discussionStatus: 'NONE',
+            latestCommentFingerprint: null,
             checkRuns: [],
             failedRuns: [],
             failedJobs: [],
@@ -232,87 +254,64 @@ export class DashboardService {
   }
 
   /**
-   * Auto-refresh: only re-poll PRs that are in "pending" (running) status.
+   * Fast refresh for PRs with running CI.
    */
-  async refreshPendingPrs(): Promise<void> {
+  async refreshPendingPrActivity(): Promise<void> {
     const list = this._prList();
     const pendingIndices = list
-      .map((item, i) => (item.ciStatus === 'pending' ? i : -1))
-      .filter((i) => i !== -1);
+      .map((item, index) => (item.ciStatus === 'pending' ? index : -1))
+      .filter((index) => index !== -1);
 
     if (pendingIndices.length === 0) return;
 
-    for (const idx of pendingIndices) {
-      this._prList.update((l) => {
-        const updated = [...l];
-        updated[idx] = { ...updated[idx], isLoading: true };
-        return updated;
-      });
-    }
-
-    await Promise.allSettled(pendingIndices.map((idx) => this.loadCIStatusForIndex(idx)));
+    await Promise.allSettled(pendingIndices.map((index) => this.pollPrActivityForIndex(index)));
     this._lastRefresh.set(new Date());
     this.updateRateLimit();
   }
 
   /**
-   * Auto-refresh for successful PRs: only refresh review status.
+   * Slow refresh for non-pending PRs, to discover state changes without
+   * constantly re-rendering cards.
    */
-  async refreshSuccessfulPrs(): Promise<void> {
+  async refreshPrActivity(): Promise<void> {
     const list = this._prList();
-    const successIndices = list
-      .map((item, i) => (item.ciStatus === 'success' ? i : -1))
-      .filter((i) => i !== -1);
+    const nonPendingIndices = list
+      .map((item, index) => (item.ciStatus !== 'pending' ? index : -1))
+      .filter((index) => index !== -1);
 
-    if (successIndices.length === 0) return;
+    if (nonPendingIndices.length === 0) return;
 
-    await Promise.allSettled(successIndices.map((idx) => this.loadReviewOnlyForIndex(idx)));
+    await Promise.allSettled(nonPendingIndices.map((index) => this.pollPrActivityForIndex(index)));
+    this._lastRefresh.set(new Date());
     this.updateRateLimit();
   }
 
-  private async loadReviewOnlyForIndex(index: number): Promise<void> {
+  private async pollPrActivityForIndex(index: number): Promise<void> {
     const item = this._prList()[index];
     if (!item) return;
 
     try {
       const [owner, repo] = item.pr.base.repo.full_name.split('/');
-      const [reviews, discussionStatusData] = await Promise.all([
-        firstValueFrom(this.api.getReviews(owner, repo, item.pr.number)),
-        firstValueFrom(this.api.getPrDiscussionsStatus(owner, repo, item.pr.number)),
-      ]);
+      const latestPr = await firstValueFrom(this.api.getPullRequest(owner, repo, item.pr.number));
+      const snapshot = await this.loadActivitySnapshot(latestPr);
 
-      const oldItem = this._prList()[index];
-      const isSelected = this._selectedPrId() === oldItem.pr.id;
+      const currentItem = this._prList()[index];
+      if (!currentItem || currentItem.pr.id !== item.pr.id) return;
 
-      const newDiscussionStatus = this.computeDiscussionStatus(discussionStatusData.unresolvedThreads);
-      const hasOpenDiscussions = newDiscussionStatus !== 'NONE';
-      const newReviewStatus = this.computeReviewStatus(reviews, hasOpenDiscussions);
+      const headChanged = currentItem.pr.head.sha !== latestPr.head.sha;
+      const ciFinished =
+        currentItem.ciStatus === 'pending' && (snapshot.ciStatus === 'success' || snapshot.ciStatus === 'failure');
+      const approvalGranted = currentItem.reviewStatus !== 'APPROVED' && snapshot.reviewStatus === 'APPROVED';
+      const newComment = this.hasNewExternalComment(currentItem, snapshot);
 
-      let unseenApproval = oldItem.unseenApproval;
-      let unseenDiscussions = oldItem.unseenDiscussions;
-
-      // Check for approval change
-      if (oldItem.reviewStatus !== 'APPROVED' && newReviewStatus === 'APPROVED') {
-        if (!isSelected) unseenApproval = true;
+      if (!headChanged && !ciFinished && !approvalGranted && !newComment) {
+        return;
       }
 
-      // Check for new discussions
-      if (oldItem.discussionStatus !== 'NEW_CONTENT' && newDiscussionStatus === 'NEW_CONTENT') {
-        if (!isSelected) unseenDiscussions = true;
-      }
-
-      this._prList.update((list) => {
-        const updated = [...list];
-        updated[index] = {
-          ...updated[index],
-          reviewStatus: newReviewStatus,
-          discussionStatus: newDiscussionStatus,
-          unseenApproval,
-          unseenDiscussions,
-          isMergeable:
-            updated[index].ciStatus === 'success' && newReviewStatus === 'APPROVED' && !item.pr.draft,
-        };
-        return updated;
+      await this.applyActivitySnapshot(index, latestPr, snapshot, {
+        notifyCiFinish: ciFinished,
+        notifyApproval: approvalGranted,
+        notifyComment: newComment,
       });
     } catch {
       // Background refresh failure is non-critical
@@ -381,20 +380,24 @@ export class DashboardService {
     return success;
   }
 
-  startAutoRefresh(pendingIntervalMs: number = 15000, successIntervalMs: number = 60000): void {
+  startAutoRefresh(pendingIntervalMs: number = 15000, activityIntervalMs: number = 60000): void {
     this.stopAutoRefresh();
-    this.refreshInterval = setInterval(() => this.refreshPendingPrs(), pendingIntervalMs);
-    this.successRefreshInterval = setInterval(() => this.refreshSuccessfulPrs(), successIntervalMs);
+    this.pendingRefreshInterval = setInterval(() => {
+      void this.refreshPendingPrActivity();
+    }, pendingIntervalMs);
+    this.activityRefreshInterval = setInterval(() => {
+      void this.refreshPrActivity();
+    }, activityIntervalMs);
   }
 
   stopAutoRefresh(): void {
-    if (this.refreshInterval) {
-      clearInterval(this.refreshInterval);
-      this.refreshInterval = null;
+    if (this.pendingRefreshInterval) {
+      clearInterval(this.pendingRefreshInterval);
+      this.pendingRefreshInterval = null;
     }
-    if (this.successRefreshInterval) {
-      clearInterval(this.successRefreshInterval);
-      this.successRefreshInterval = null;
+    if (this.activityRefreshInterval) {
+      clearInterval(this.activityRefreshInterval);
+      this.activityRefreshInterval = null;
     }
   }
 
@@ -408,67 +411,12 @@ export class DashboardService {
     if (!item) return;
 
     try {
-      const repoFullName = item.pr.base.repo.full_name;
-      const [owner, repo] = repoFullName.split('/');
-
-      const [checkRuns, reviews, discussionStatusData] = await Promise.all([
-        this.ciService.loadCheckRuns(item.pr),
-        firstValueFrom(this.api.getReviews(owner, repo, item.pr.number)),
-        firstValueFrom(this.api.getPrDiscussionsStatus(owner, repo, item.pr.number)),
-      ]);
-
-      const oldItem = this._prList()[index];
-      const isSelected = this._selectedPrId() === oldItem.pr.id;
-
-      const newCiStatus = this.ciService.computeCIStatus(checkRuns);
-      const newDiscussionStatus = this.computeDiscussionStatus(discussionStatusData.unresolvedThreads);
-      const hasOpenDiscussions = newDiscussionStatus !== 'NONE';
-      const newReviewStatus = this.computeReviewStatus(reviews, hasOpenDiscussions);
-
-      let unseenCiFinish = oldItem.unseenCiFinish;
-      let unseenApproval = oldItem.unseenApproval;
-      let unseenDiscussions = oldItem.unseenDiscussions;
-
-      // Check for CI change
-      if (oldItem.ciStatus === 'pending' && (newCiStatus === 'success' || newCiStatus === 'failure')) {
-        if (!isSelected) unseenCiFinish = true;
-      }
-
-      // Check for approval change
-      if (oldItem.reviewStatus !== 'APPROVED' && newReviewStatus === 'APPROVED') {
-        if (!isSelected) unseenApproval = true;
-      }
-
-      // Check for new discussions
-      if (oldItem.discussionStatus !== 'NEW_CONTENT' && newDiscussionStatus === 'NEW_CONTENT') {
-        if (!isSelected) unseenDiscussions = true;
-      }
-
-      let failedRuns = item.failedRuns;
-      let failedJobs = item.failedJobs;
-
-      if (newCiStatus === 'failure') {
-        failedRuns = await this.ciService.loadFailedWorkflowRuns(item.pr);
-        failedJobs = await this.ciService.loadFailedJobsWithErrors(item.pr, failedRuns);
-      }
-
-      this._prList.update((list) => {
-        const updated = [...list];
-        updated[index] = {
-          ...updated[index],
-          checkRuns,
-          ciStatus: newCiStatus,
-          reviewStatus: newReviewStatus,
-          discussionStatus: newDiscussionStatus,
-          unseenCiFinish,
-          unseenApproval,
-          unseenDiscussions,
-          isMergeable: newCiStatus === 'success' && newReviewStatus === 'APPROVED' && !item.pr.draft,
-          failedRuns,
-          failedJobs,
-          isLoading: false,
-        };
-        return updated;
+      const snapshot = await this.loadActivitySnapshot(item.pr);
+      await this.applyActivitySnapshot(index, item.pr, snapshot, {
+        notifyCiFinish: false,
+        notifyApproval: false,
+        notifyComment: false,
+        forceRefresh: true,
       });
     } catch {
       this._prList.update((list) => {
@@ -488,6 +436,149 @@ export class DashboardService {
     const myLogin = this.auth.user()?.login;
     const hasUnreplied = unresolved.some((t) => t.lastCommentAuthor !== myLogin);
     return hasUnreplied ? 'NEW_CONTENT' : 'REPLIED';
+  }
+
+  private async loadActivitySnapshot(pr: PullRequest): Promise<PrActivitySnapshot> {
+    const [owner, repo] = pr.base.repo.full_name.split('/');
+
+    const [checkRuns, reviews, discussionStatusData, prComments, reviewComments] = await Promise.all([
+      this.ciService.loadCheckRuns(pr),
+      firstValueFrom(this.api.getReviews(owner, repo, pr.number)),
+      firstValueFrom(this.api.getPrDiscussionsStatus(owner, repo, pr.number)),
+      firstValueFrom(this.api.getPrComments(owner, repo, pr.number)),
+      firstValueFrom(this.api.getPrReviewComments(owner, repo, pr.number)),
+    ]);
+
+    const discussionStatus = this.computeDiscussionStatus(discussionStatusData.unresolvedThreads);
+    const reviewStatus = this.computeReviewStatus(reviews, discussionStatus !== 'NONE');
+    const latestComment = this.findLatestComment(prComments, reviewComments, reviews);
+
+    return {
+      checkRuns,
+      ciStatus: this.ciService.computeCIStatus(checkRuns),
+      reviewStatus,
+      discussionStatus,
+      latestCommentFingerprint: latestComment?.fingerprint ?? null,
+      latestCommentAuthor: latestComment?.author ?? null,
+    };
+  }
+
+  private async applyActivitySnapshot(
+    index: number,
+    pr: PullRequest,
+    snapshot: PrActivitySnapshot,
+    options: {
+      notifyCiFinish: boolean;
+      notifyApproval: boolean;
+      notifyComment: boolean;
+      forceRefresh?: boolean;
+    },
+  ): Promise<void> {
+    const currentItem = this._prList()[index];
+    if (!currentItem) return;
+
+    const isSelected = this._selectedPrId() === currentItem.pr.id;
+
+    let failedRuns = currentItem.failedRuns;
+    let failedJobs = currentItem.failedJobs;
+
+    if (snapshot.ciStatus === 'failure') {
+      failedRuns = await this.ciService.loadFailedWorkflowRuns(pr);
+      failedJobs = await this.ciService.loadFailedJobsWithErrors(pr, failedRuns);
+    } else if (currentItem.failedRuns.length > 0 || currentItem.failedJobs.length > 0) {
+      failedRuns = [];
+      failedJobs = [];
+    }
+
+    const unseenCiFinish = options.notifyCiFinish && !isSelected ? true : currentItem.unseenCiFinish;
+    const unseenApproval = options.notifyApproval && !isSelected ? true : currentItem.unseenApproval;
+    const unseenDiscussions = options.notifyComment && !isSelected ? true : currentItem.unseenDiscussions;
+
+    const nextItem: PullRequestWithStatus = {
+      ...currentItem,
+      pr,
+      checkRuns: snapshot.checkRuns,
+      ciStatus: snapshot.ciStatus,
+      reviewStatus: snapshot.reviewStatus,
+      discussionStatus: snapshot.discussionStatus,
+      latestCommentFingerprint: snapshot.latestCommentFingerprint,
+      unseenCiFinish,
+      unseenApproval,
+      unseenDiscussions,
+      isMergeable: snapshot.ciStatus === 'success' && snapshot.reviewStatus === 'APPROVED' && !pr.draft,
+      failedRuns,
+      failedJobs,
+      isLoading: false,
+    };
+
+    const shouldUpdate =
+      options.forceRefresh ||
+      currentItem.pr !== nextItem.pr ||
+      currentItem.ciStatus !== nextItem.ciStatus ||
+      currentItem.reviewStatus !== nextItem.reviewStatus ||
+      currentItem.discussionStatus !== nextItem.discussionStatus ||
+      currentItem.latestCommentFingerprint !== nextItem.latestCommentFingerprint ||
+      currentItem.unseenCiFinish !== nextItem.unseenCiFinish ||
+      currentItem.unseenApproval !== nextItem.unseenApproval ||
+      currentItem.unseenDiscussions !== nextItem.unseenDiscussions ||
+      currentItem.isMergeable !== nextItem.isMergeable ||
+      currentItem.isLoading !== nextItem.isLoading ||
+      currentItem.checkRuns !== nextItem.checkRuns ||
+      currentItem.failedRuns !== nextItem.failedRuns ||
+      currentItem.failedJobs !== nextItem.failedJobs;
+
+    if (!shouldUpdate) return;
+
+    this._prList.update((list) => {
+      const updated = [...list];
+      const latestItem = updated[index];
+      if (!latestItem || latestItem.pr.id !== currentItem.pr.id) {
+        return list;
+      }
+      updated[index] = {
+        ...latestItem,
+        ...nextItem,
+      };
+      return updated;
+    });
+  }
+
+  private hasNewExternalComment(item: PullRequestWithStatus, snapshot: PrActivitySnapshot): boolean {
+    if (!snapshot.latestCommentFingerprint) return false;
+    if (snapshot.latestCommentFingerprint === item.latestCommentFingerprint) return false;
+
+    return snapshot.latestCommentAuthor !== this.auth.user()?.login;
+  }
+
+  private findLatestComment(
+    prComments: any[],
+    reviewComments: any[],
+    reviews: any[],
+  ): { fingerprint: string; author: string | null } | null {
+    const commentLikeReviews = reviews.filter(
+      (review) => review.state === 'COMMENTED' && typeof review.body === 'string' && review.body.trim().length > 0,
+    );
+
+    const latest = [...prComments, ...reviewComments, ...commentLikeReviews]
+      .map((comment) => ({
+        id: comment.id,
+        author: comment.user?.login ?? null,
+        timestamp: comment.updated_at ?? comment.created_at ?? comment.submitted_at ?? null,
+      }))
+      .filter((comment): comment is { id: number; author: string | null; timestamp: string } => Boolean(comment.timestamp))
+      .sort((a, b) => {
+        if (a.timestamp === b.timestamp) {
+          return b.id - a.id;
+        }
+        return b.timestamp.localeCompare(a.timestamp);
+      })[0];
+
+    if (!latest) return null;
+
+    return {
+      fingerprint: `${latest.id}:${latest.timestamp}`,
+      author: latest.author,
+    };
   }
 
   async updatePrMetadata(prId: number, title: string, body: string): Promise<void> {

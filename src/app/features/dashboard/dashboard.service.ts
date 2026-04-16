@@ -132,7 +132,7 @@ export class DashboardService {
     const author = this._filterAuthor() ?? user.login;
 
     try {
-      const searchResult = await firstValueFrom(this.api.searchUserPullRequests(author, 'rosahealth/rosa'));
+      const searchResult = (await firstValueFrom(this.api.searchUserPullRequests(author, 'rosahealth/rosa'))) as { items: PullRequest[] };
       const searchItems = searchResult.items;
 
       const prWithStatuses: PullRequestWithStatus[] = [];
@@ -146,7 +146,7 @@ export class DashboardService {
         if (!prNumber) continue;
 
         try {
-          const fullPr = await firstValueFrom(this.api.getPullRequest(owner, repo, prNumber));
+          const fullPr = (await firstValueFrom(this.api.getPullRequest(owner, repo, prNumber))) as PullRequest;
           prWithStatuses.push({
             pr: fullPr,
             ciStatus: 'unknown',
@@ -205,7 +205,7 @@ export class DashboardService {
       const prNumber = item.pr.number;
 
       // Reload PR metadata (vitals like Title, Body, Head SHA)
-      const updatedPr = await firstValueFrom(this.api.getPullRequest(owner, repo, prNumber));
+      const updatedPr = (await firstValueFrom(this.api.getPullRequest(owner, repo, prNumber))) as PullRequest;
 
       this._prList.update((list) => {
         const updated = [...list];
@@ -246,7 +246,7 @@ export class DashboardService {
     });
 
     try {
-      await firstValueFrom(this.api.mergePullRequest(owner, repo, item.pr.number));
+      await firstValueFrom(this.api.mergePullRequest(owner, repo, item.pr.number)) as any;
 
       // Remove PR from list immediately
       const remainingPrs = this._prList().filter((p) => p.pr.id !== prId);
@@ -274,7 +274,6 @@ export class DashboardService {
   /**
    * Fast refresh for PRs with running CI.
    */
-<<<<<<< HEAD
   async refreshPendingPrActivity(): Promise<void> {
     const list = this._prList();
     const pendingIndices = list
@@ -285,47 +284,10 @@ export class DashboardService {
 
     await Promise.allSettled(pendingIndices.map((index) => this.pollPrActivityForIndex(index)));
     this._lastRefresh.set(new Date());
-=======
-  async refreshPendingPrs(): Promise<void> {
-    const currentList = this._prList();
-    const pendingIndices = currentList
-      .map((item, i) => (item.ciStatus === 'pending' ? i : -1))
-      .filter((i) => i !== -1);
-
-    if (pendingIndices.length === 0) return;
-
-    // Fetch refreshed items in background without showing loader for background sync
-    const refreshedPromises = pendingIndices.map((idx) => {
-      const item = currentList[idx];
-      return this.loadUpdatedPrStatus(item);
-    });
-
-    const results = await Promise.allSettled(refreshedPromises);
-    
-    let hasChanges = false;
-    const newList = [...currentList];
-
-    results.forEach((res, i) => {
-      const originalIdx = pendingIndices[i];
-      if (res.status === 'fulfilled') {
-        if (!this.arePrsEffectivelyEqual(newList[originalIdx], res.value)) {
-          newList[originalIdx] = res.value;
-          hasChanges = true;
-        }
-      }
-    });
-
-    if (hasChanges) {
-      this._prList.set(newList);
-      this._lastRefresh.set(new Date());
-    }
-    
->>>>>>> f5be03b (fix many prop)
     this.updateRateLimit();
   }
 
   /**
-<<<<<<< HEAD
    * Slow refresh for non-pending PRs, to discover state changes without
    * constantly re-rendering cards.
    */
@@ -339,20 +301,20 @@ export class DashboardService {
 
     await Promise.allSettled(nonPendingIndices.map((index) => this.pollPrActivityForIndex(index)));
     this._lastRefresh.set(new Date());
-=======
+  }
+
+  /**
    * Sync the PR list: add new PRs, remove merged/closed ones, and refresh status for all.
    * This handles detecting new PRs, removed PRs, and job restarts.
    */
   async syncPullRequests(): Promise<void> {
     const user = this.auth.user();
     if (!user) return;
-
->>>>>>> f5be03b (fix many prop)
     this.updateRateLimit();
 
     const author = this._filterAuthor() ?? user.login;
     try {
-      const searchResult = await firstValueFrom(this.api.searchUserPullRequests(author, 'rosahealth/rosa'));
+      const searchResult = (await firstValueFrom(this.api.searchUserPullRequests(author, 'rosahealth/rosa'))) as { items: PullRequest[] };
       const searchItems = searchResult.items;
       
       const currentPrs = this._prList();
@@ -383,13 +345,14 @@ export class DashboardService {
         if (!prNumber) continue;
 
         try {
-          const fullPr = await firstValueFrom(this.api.getPullRequest(owner, repo, prNumber));
+          const fullPr = await firstValueFrom(this.api.getPullRequest(owner, repo, prNumber)) as PullRequest;
           updatedList.push({
             pr: fullPr,
             ciStatus: 'unknown',
             reviewStatus: 'PENDING',
             isMergeable: false,
             discussionStatus: 'NONE',
+            latestCommentFingerprint: null,
             checkRuns: [],
             failedRuns: [],
             failedJobs: [],
@@ -482,8 +445,10 @@ export class DashboardService {
 
       const [checkRuns, reviews, discussionStatusData] = await Promise.all([
         this.ciService.loadCheckRuns(item.pr),
-        firstValueFrom(this.api.getReviews(owner, repo, item.pr.number)),
-        firstValueFrom(this.api.getPrDiscussionsStatus(owner, repo, item.pr.number)),
+        firstValueFrom(this.api.getReviews(owner, repo, item.pr.number)) as Promise<any[]>,
+        firstValueFrom(this.api.getPrDiscussionsStatus(owner, repo, item.pr.number)) as Promise<{
+          unresolvedThreads: Array<{ isResolved: boolean; lastCommentAuthor: string }>;
+        }>,
       ]);
 
       const isSelected = this._selectedPrId() === item.pr.id;
@@ -570,7 +535,7 @@ export class DashboardService {
 
     try {
       const [owner, repo] = item.pr.base.repo.full_name.split('/');
-      const latestPr = await firstValueFrom(this.api.getPullRequest(owner, repo, item.pr.number));
+      const latestPr = await firstValueFrom(this.api.getPullRequest(owner, repo, item.pr.number)) as PullRequest;
       const snapshot = await this.loadActivitySnapshot(latestPr);
 
       const currentItem = this._prList()[index];
@@ -582,7 +547,6 @@ export class DashboardService {
       const approvalGranted = currentItem.reviewStatus !== 'APPROVED' && snapshot.reviewStatus === 'APPROVED';
       const newComment = this.hasNewExternalComment(currentItem, snapshot);
 
-<<<<<<< HEAD
       if (!headChanged && !ciFinished && !approvalGranted && !newComment) {
         return;
       }
@@ -591,39 +555,6 @@ export class DashboardService {
         notifyCiFinish: ciFinished,
         notifyApproval: approvalGranted,
         notifyComment: newComment,
-=======
-      let unseenApproval = oldItem.unseenApproval;
-      let unseenDiscussions = oldItem.unseenDiscussions;
-
-      // Check for approval change
-      if (oldItem.reviewStatus !== 'APPROVED' && newReviewStatus === 'APPROVED') {
-        unseenApproval = !isSelected;
-      }
-
-      // Check for new discussions
-      if (oldItem.discussionStatus !== 'NEW_CONTENT' && newDiscussionStatus === 'NEW_CONTENT') {
-        unseenDiscussions = !isSelected;
-      }
-
-      // If selected, always clear flags
-      if (isSelected) {
-        unseenApproval = false;
-        unseenDiscussions = false;
-      }
-
-      this._prList.update((list) => {
-        const updated = [...list];
-        updated[index] = {
-          ...updated[index],
-          reviewStatus: newReviewStatus,
-          discussionStatus: newDiscussionStatus,
-          unseenApproval,
-          unseenDiscussions,
-          isMergeable:
-            updated[index].ciStatus === 'success' && newReviewStatus === 'APPROVED' && !item.pr.draft,
-        };
-        return updated;
->>>>>>> f5be03b (fix many prop)
       });
     } catch {
       // Background refresh failure is non-critical
@@ -692,21 +623,14 @@ export class DashboardService {
     return success;
   }
 
-<<<<<<< HEAD
-  startAutoRefresh(pendingIntervalMs: number = 15000, activityIntervalMs: number = 60000): void {
+  startAutoRefresh(pendingIntervalMs: number = 15000, syncIntervalMs: number = 60000): void {
     this.stopAutoRefresh();
     this.pendingRefreshInterval = setInterval(() => {
       void this.refreshPendingPrActivity();
     }, pendingIntervalMs);
     this.activityRefreshInterval = setInterval(() => {
-      void this.refreshPrActivity();
-    }, activityIntervalMs);
-=======
-  startAutoRefresh(pendingIntervalMs: number = 15000, syncIntervalMs: number = 60000): void {
-    this.stopAutoRefresh();
-    this.refreshInterval = setInterval(() => this.refreshPendingPrs(), pendingIntervalMs);
-    this.successRefreshInterval = setInterval(() => this.syncPullRequests(), syncIntervalMs);
->>>>>>> f5be03b (fix many prop)
+      void this.syncPullRequests();
+    }, syncIntervalMs);
   }
 
   stopAutoRefresh(): void {
@@ -730,94 +654,12 @@ export class DashboardService {
     if (!item) return;
 
     try {
-<<<<<<< HEAD
       const snapshot = await this.loadActivitySnapshot(item.pr);
       await this.applyActivitySnapshot(index, item.pr, snapshot, {
         notifyCiFinish: false,
         notifyApproval: false,
         notifyComment: false,
         forceRefresh: true,
-=======
-      const repoFullName = item.pr.base.repo.full_name;
-      const [owner, repo] = repoFullName.split('/');
-
-      const [checkRuns, reviews, discussionStatusData] = await Promise.all([
-        this.ciService.loadCheckRuns(item.pr),
-        firstValueFrom(this.api.getReviews(owner, repo, item.pr.number)),
-        firstValueFrom(this.api.getPrDiscussionsStatus(owner, repo, item.pr.number)),
-      ]);
-
-      const oldItem = this._prList()[index];
-      const isSelected = this._selectedPrId() === oldItem.pr.id;
-
-      const newCiStatus = this.ciService.computeCIStatus(checkRuns);
-      const newDiscussionStatus = this.computeDiscussionStatus(discussionStatusData.unresolvedThreads);
-      const hasOpenDiscussions = newDiscussionStatus !== 'NONE';
-      const newReviewStatus = this.computeReviewStatus(reviews, hasOpenDiscussions);
-
-      let unseenCiFinish = oldItem.unseenCiFinish;
-      let unseenApproval = oldItem.unseenApproval;
-      let unseenDiscussions = oldItem.unseenDiscussions;
-
-      // Check for CI change
-      if (
-        triggerNotifications &&
-        oldItem.ciStatus !== newCiStatus &&
-        (newCiStatus === 'success' || newCiStatus === 'failure')
-      ) {
-        unseenCiFinish = !isSelected;
-        if (unseenCiFinish) this.showNotification('CI Finished', `PR #${item.pr.number} is now ${newCiStatus}`);
-      }
-
-      // Check for approval change
-      if (triggerNotifications && oldItem.reviewStatus !== 'APPROVED' && newReviewStatus === 'APPROVED') {
-        unseenApproval = !isSelected;
-        if (unseenApproval) this.showNotification('PR Approved', `PR #${item.pr.number} has been approved`);
-      }
-
-      // Check for new discussions
-      if (
-        triggerNotifications &&
-        oldItem.discussionStatus !== 'NEW_CONTENT' &&
-        newDiscussionStatus === 'NEW_CONTENT'
-      ) {
-        unseenDiscussions = !isSelected;
-        if (unseenDiscussions) this.showNotification('New Message', `New unresolved discussion on PR #${item.pr.number}`);
-      }
-
-      // If selected, always clear flags
-      if (isSelected) {
-        unseenCiFinish = false;
-        unseenApproval = false;
-        unseenDiscussions = false;
-      }
-
-      let failedRuns = item.failedRuns;
-      let failedJobs = item.failedJobs;
-
-      if (checkRuns.some(cr => cr.conclusion === 'failure')) {
-        failedRuns = await this.ciService.loadFailedWorkflowRuns(item.pr);
-        failedJobs = await this.ciService.loadFailedJobsWithErrors(item.pr, failedRuns);
-      }
-
-      this._prList.update((list) => {
-        const updated = [...list];
-        updated[index] = {
-          ...updated[index],
-          checkRuns,
-          ciStatus: newCiStatus,
-          reviewStatus: newReviewStatus,
-          discussionStatus: newDiscussionStatus,
-          unseenCiFinish,
-          unseenApproval,
-          unseenDiscussions,
-          isMergeable: newCiStatus === 'success' && newReviewStatus === 'APPROVED' && !item.pr.draft,
-          failedRuns,
-          failedJobs,
-          isLoading: false,
-        };
-        return updated;
->>>>>>> f5be03b (fix many prop)
       });
     } catch {
       this._prList.update((list) => {
@@ -846,10 +688,12 @@ export class DashboardService {
 
     const [checkRuns, reviews, discussionStatusData, prComments, reviewComments] = await Promise.all([
       this.ciService.loadCheckRuns(pr),
-      firstValueFrom(this.api.getReviews(owner, repo, pr.number)),
-      firstValueFrom(this.api.getPrDiscussionsStatus(owner, repo, pr.number)),
-      firstValueFrom(this.api.getPrComments(owner, repo, pr.number)),
-      firstValueFrom(this.api.getPrReviewComments(owner, repo, pr.number)),
+      firstValueFrom(this.api.getReviews(owner, repo, pr.number)) as Promise<any[]>,
+      firstValueFrom(this.api.getPrDiscussionsStatus(owner, repo, pr.number)) as Promise<{
+        unresolvedThreads: Array<{ isResolved: boolean; lastCommentAuthor: string }>;
+      }>,
+      firstValueFrom(this.api.getPrComments(owner, repo, pr.number)) as Promise<any[]>,
+      firstValueFrom(this.api.getPrReviewComments(owner, repo, pr.number)) as Promise<any[]>,
     ]);
 
     const discussionStatus = this.computeDiscussionStatus(discussionStatusData.unresolvedThreads);
@@ -990,7 +834,7 @@ export class DashboardService {
     const { base, number } = this._prList()[index].pr;
     const owner = base.repo.owner.login;
     const repo = base.repo.name;
-    const updated = await firstValueFrom(this.api.updatePullRequest(owner, repo, number, title, body));
+    const updated = (await firstValueFrom(this.api.updatePullRequest(owner, repo, number, title, body))) as PullRequest;
     this._prList.update((list) => {
       const copy = [...list];
       copy[index] = { ...copy[index], pr: { ...copy[index].pr, title: updated.title, body: updated.body } };
@@ -1017,7 +861,7 @@ export class DashboardService {
 
   private async updateRateLimit(): Promise<void> {
     try {
-      const result = await firstValueFrom(this.api.getRateLimit());
+      const result = (await firstValueFrom(this.api.getRateLimit())) as any;
       this._rateLimit.set(result.resources.core);
     } catch {
       // non-critical

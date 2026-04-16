@@ -50,7 +50,7 @@ export class CiStatusService {
     const sha = pr.head.sha;
 
     try {
-      const result = await firstValueFrom(this.api.getCheckRunsForRef(owner, repo, sha));
+      const result = (await firstValueFrom(this.api.getCheckRunsForRef(owner, repo, sha))) as { check_runs: CheckRun[] };
       return result.check_runs;
     } catch {
       return [];
@@ -66,7 +66,7 @@ export class CiStatusService {
     const sha = pr.head.sha;
 
     try {
-      const result = await firstValueFrom(this.api.getWorkflowRuns(owner, repo, sha));
+      const result = (await firstValueFrom(this.api.getWorkflowRuns(owner, repo, sha))) as { workflow_runs: WorkflowRun[] };
       return result.workflow_runs.filter(run => run.conclusion === 'failure' || run.status === 'in_progress');
     } catch {
       return [];
@@ -86,7 +86,7 @@ export class CiStatusService {
 
     for (const run of failedRuns) {
       try {
-        const jobsResult = await firstValueFrom(this.api.getJobsForRun(owner, repo, run.id));
+        const jobsResult = (await firstValueFrom(this.api.getJobsForRun(owner, repo, run.id))) as { jobs: WorkflowJob[] };
         const failedJobs = jobsResult.jobs.filter(j => j.conclusion === 'failure');
 
         for (const job of failedJobs) {
@@ -120,7 +120,7 @@ export class CiStatusService {
    */
   async rerunFailedJobs(owner: string, repo: string, runId: number): Promise<boolean> {
     try {
-      await firstValueFrom(this.api.rerunFailedJobs(owner, repo, runId));
+      await firstValueFrom(this.api.rerunFailedJobs(owner, repo, runId)) as any;
       return true;
     } catch {
       return false;

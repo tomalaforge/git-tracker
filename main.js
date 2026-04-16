@@ -1,6 +1,6 @@
 const { app, BrowserWindow, shell, ipcMain } = require('electron');
 const path = require('path');
-const url = require('url');
+const fs = require('fs');
 
 let win;
 let appQuitting = false;
@@ -59,8 +59,6 @@ app.on('activate', () => {
     createWindow();
   }
 });
-
-const fs = require('fs');
 
 // IPC handlers for badge support
 ipcMain.on('set-badge-count', (event, count) => {

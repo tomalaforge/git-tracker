@@ -14,6 +14,7 @@ import { firstValueFrom } from 'rxjs';
 interface ReviewThreadComment {
   id: number;
   body: string;
+  bodyHtml: string;
   path: string;
   line: number | null;
   original_line: number | null;
@@ -535,8 +536,10 @@ interface ReviewThread {
                                       commented {{ comment.created_at | date: 'MMM d, HH:mm' }}
                                     </span>
                                   </div>
-                                  <div class="px-3 py-3 text-sm text-text-secondary leading-6 whitespace-pre-wrap break-words">
-                                    {{ comment.body }}
+                                  <div
+                                    class="comment-markdown px-3 py-3 text-sm text-text-secondary break-words"
+                                    [innerHTML]="commentHtml(comment.bodyHtml, comment.body)"
+                                  >
                                   </div>
                                 </div>
                               </div>
@@ -611,8 +614,10 @@ interface ReviewThread {
                                 commented {{ comment.created_at | date: 'MMM d, HH:mm' }}
                               </span>
                             </div>
-                            <div class="px-3 py-3 text-sm text-text-secondary leading-6 whitespace-pre-wrap break-words">
-                              {{ comment.body }}
+                            <div
+                              class="comment-markdown px-3 py-3 text-sm text-text-secondary break-words"
+                              [innerHTML]="commentHtml(comment.body_html, comment.body)"
+                            >
                             </div>
                           </div>
                         </div>
@@ -681,8 +686,10 @@ interface ReviewThread {
                                         commented {{ comment.created_at | date: 'MMM d, HH:mm' }}
                                       </span>
                                     </div>
-                                    <div class="px-3 py-3 text-sm text-text-secondary leading-6 whitespace-pre-wrap break-words">
-                                      {{ comment.body }}
+                                    <div
+                                      class="comment-markdown px-3 py-3 text-sm text-text-secondary break-words"
+                                      [innerHTML]="commentHtml(comment.bodyHtml, comment.body)"
+                                    >
                                     </div>
                                   </div>
                                 </div>
@@ -1523,6 +1530,23 @@ export class PrDetailComponent {
 
   private threadLastTimestamp(thread: ReviewThread): string {
     return thread.comments[thread.comments.length - 1]?.updated_at ?? thread.comments[0]?.created_at ?? '';
+  }
+
+  commentHtml(html: string | null | undefined, fallback: string | null | undefined): string {
+    if (html) {
+      return html;
+    }
+
+    return this.escapeHtml(fallback ?? '').replace(/\n/g, '<br>');
+  }
+
+  private escapeHtml(value: string): string {
+    return value
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
   }
 
   copyFileName(path: string): void {

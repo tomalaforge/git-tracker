@@ -10,7 +10,7 @@ export const authInterceptor: HttpInterceptorFn = (req, next) => {
     const cloned = req.clone({
       setHeaders: {
         Authorization: `Bearer ${token}`,
-        Accept: 'application/vnd.github+json',
+        Accept: req.headers.get('Accept') ?? 'application/vnd.github+json',
         'X-GitHub-Api-Version': '2022-11-28',
       },
     });

@@ -117,3 +117,111 @@ input:focus, textarea:focus {
   outline: none;
   box-shadow: 0 0 0 2px var(--color-accent-glow);
 }
+
+/* Comment markdown */
+.comment-markdown {
+  color: var(--color-text-secondary);
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.comment-markdown > :first-child {
+  margin-top: 0;
+}
+
+.comment-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.comment-markdown p,
+.comment-markdown ul,
+.comment-markdown ol,
+.comment-markdown pre,
+.comment-markdown blockquote,
+.comment-markdown table,
+.comment-markdown hr {
+  margin: 0 0 0.85rem;
+}
+
+.comment-markdown ul,
+.comment-markdown ol {
+  padding-left: 1.35rem;
+}
+
+.comment-markdown ul {
+  list-style: disc;
+}
+
+.comment-markdown ol {
+  list-style: decimal;
+}
+
+.comment-markdown li + li {
+  margin-top: 0.3rem;
+}
+
+.comment-markdown a {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--color-accent) 55%, transparent);
+  text-underline-offset: 0.18em;
+}
+
+.comment-markdown code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid var(--color-border-glass);
+  border-radius: 0.45rem;
+  padding: 0.15rem 0.35rem;
+}
+
+.comment-markdown pre {
+  background: rgba(2, 6, 23, 0.92);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 0.85rem;
+  overflow-x: auto;
+  padding: 0.85rem 1rem;
+}
+
+.comment-markdown pre code {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  display: block;
+  padding: 0;
+  white-space: pre;
+}
+
+.comment-markdown blockquote {
+  border-left: 3px solid rgba(148, 163, 184, 0.35);
+  color: #94a3b8;
+  margin-left: 0;
+  padding-left: 0.85rem;
+}
+
+.comment-markdown table {
+  border-collapse: collapse;
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.comment-markdown th,
+.comment-markdown td {
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  padding: 0.45rem 0.7rem;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.comment-markdown th {
+  background: rgba(15, 23, 42, 0.88);
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.comment-markdown hr {
+  border: 0;
+  border-top: 1px solid rgba(148, 163, 184, 0.16);
+}

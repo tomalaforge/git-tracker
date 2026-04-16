@@ -172,6 +172,7 @@ export class GitHubApiService {
                   nodes {
                     databaseId
                     body
+                    bodyHTML
                     createdAt
                     updatedAt
                     diffHunk
@@ -201,6 +202,7 @@ export class GitHubApiService {
               .map((comment: any) => ({
                 id: comment.databaseId,
                 body: comment.body || '',
+                bodyHtml: comment.bodyHTML || '',
                 diff_hunk: comment.diffHunk || null,
                 path: comment.path || '',
                 line: comment.line ?? comment.originalLine ?? null,
@@ -238,9 +240,12 @@ export class GitHubApiService {
    */
   getPrComments(owner: string, repo: string, prNumber: number): Observable<any[]> {
     const params = new HttpParams().set('per_page', '100');
+    const headers = new HttpHeaders({
+      Accept: 'application/vnd.github.full+json',
+    });
     return this.http.get<any[]>(
       `${API_BASE}/repos/${owner}/${repo}/issues/${prNumber}/comments`,
-      { params },
+      { headers, params },
     );
   }
 

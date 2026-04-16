@@ -120,6 +120,7 @@ export interface PullRequestWithStatus {
   reviewStatus: ReviewStatus;
   isMergeable: boolean;
   discussionStatus: 'NONE' | 'REPLIED' | 'NEW_CONTENT';
+  latestCommentFingerprint: string | null;
   checkRuns: CheckRun[];
   failedRuns: WorkflowRun[];
   failedJobs: WorkflowJobWithErrors[];

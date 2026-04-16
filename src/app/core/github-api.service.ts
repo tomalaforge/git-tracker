@@ -157,6 +157,83 @@ export class GitHubApiService {
   }
 
   /**
+   * Get review threads for a pull request, including resolution state.
+   */
+  getPrReviewThreads(owner: string, repo: string, prNumber: number): Observable<any[]> {
+    const query = `
+      query($owner: String!, $repo: String!, $number: Int!) {
+        repository(owner: $owner, name: $repo) {
+          pullRequest(number: $number) {
+            reviewThreads(last: 100) {
+              nodes {
+                id
+                isResolved
+                comments(first: 100) {
+                  nodes {
+                    databaseId
+                    body
+                    createdAt
+                    updatedAt
+                    diffHunk
+                    path
+                    line
+                    originalLine
+                    author {
+                      login
+                      avatarUrl
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    return this.http.post<any>(`${API_BASE}/graphql`, { query, variables: { owner, repo, number: prNumber } }).pipe(
+      map((res) => {
+        const threads = res?.data?.repository?.pullRequest?.reviewThreads?.nodes || [];
+        return threads
+          .map((thread: any) => {
+            const comments = (thread.comments?.nodes || [])
+              .filter((comment: any) => comment?.databaseId)
+              .map((comment: any) => ({
+                id: comment.databaseId,
+                body: comment.body || '',
+                diff_hunk: comment.diffHunk || null,
+                path: comment.path || '',
+                line: comment.line ?? comment.originalLine ?? null,
+                original_line: comment.originalLine ?? null,
+                created_at: comment.createdAt,
+                updated_at: comment.updatedAt,
+                user: {
+                  login: comment.author?.login || 'ghost',
+                  avatar_url: comment.author?.avatarUrl || '',
+                },
+              }));
+
+            if (comments.length === 0) {
+              return null;
+            }
+
+            const root = comments[0];
+            return {
+              id: thread.id,
+              rootId: root.id,
+              isResolved: Boolean(thread.isResolved),
+              path: root.path,
+              line: root.line ?? root.original_line ?? null,
+              diffHunk: root.diff_hunk,
+              comments,
+            };
+          })
+          .filter(Boolean);
+      }),
+    );
+  }
+
+  /**
    * Get general comments on a pull request (issue-level comments).
    */
   getPrComments(owner: string, repo: string, prNumber: number): Observable<any[]> {

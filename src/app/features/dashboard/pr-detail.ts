@@ -27,6 +27,13 @@ interface ReviewThreadComment {
   };
 }
 
+interface ReviewDiffLine {
+  lineNumber: number | null;
+  prefix: '+' | '-' | ' ';
+  content: string;
+  type: 'add' | 'remove' | 'context';
+}
+
 interface ReviewThread {
   id: string;
   rootId: number;
@@ -34,6 +41,7 @@ interface ReviewThread {
   path: string;
   line: number | null;
   diffHunk: string | null;
+  diffLines: ReviewDiffLine[];
   comments: ReviewThreadComment[];
 }
 
@@ -510,6 +518,40 @@ interface ReviewThread {
                                 Unresolved
                               </span>
                               <button
+                                (click)="resolveThread(thread.id)"
+                                [disabled]="isResolvingThread(thread.id)"
+                                class="inline-flex items-center gap-1 rounded-lg border border-success-border/50 bg-success-bg/15 px-2.5 py-1 text-[10px] font-semibold text-success transition-colors hover:bg-success-bg/25 disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
+                                title="Resolve conversation"
+                              >
+                                @if (isResolvingThread(thread.id)) {
+                                  <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                                    <circle
+                                      class="opacity-25"
+                                      cx="12"
+                                      cy="12"
+                                      r="10"
+                                      stroke="currentColor"
+                                      stroke-width="4"
+                                    ></circle>
+                                    <path
+                                      class="opacity-75"
+                                      fill="currentColor"
+                                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                                    ></path>
+                                  </svg>
+                                  Resolving…
+                                } @else {
+                                  <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                    <path
+                                      fill-rule="evenodd"
+                                      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                                      clip-rule="evenodd"
+                                    />
+                                  </svg>
+                                  Resolve
+                                }
+                              </button>
+                              <button
                                 (click)="copyFileName(thread.path)"
                                 class="p-1 rounded text-text-muted hover:text-accent transition-colors cursor-pointer"
                                 [title]="copiedFileName() === thread.path ? 'Copied!' : 'Copy filename'"
@@ -521,8 +563,23 @@ interface ReviewThread {
                             </div>
                           </div>
 
-                          @if (thread.diffHunk) {
-                            <pre class="border-b border-border-glass bg-bg-primary/70 px-4 py-3 text-[11px] font-mono text-text-muted overflow-x-auto whitespace-pre-wrap leading-relaxed">{{ thread.diffHunk }}</pre>
+                          @if (thread.diffLines.length > 0) {
+                            <div class="review-diff border-b border-border-glass" aria-label="Code context">
+                              @for (line of thread.diffLines; track $index) {
+                                <div
+                                  class="review-diff-line"
+                                  [class.review-diff-line-add]="line.type === 'add'"
+                                  [class.review-diff-line-remove]="line.type === 'remove'"
+                                  [class.review-diff-line-context]="line.type === 'context'"
+                                >
+                                  <span class="review-diff-number">
+                                    {{ line.lineNumber ?? '' }}
+                                  </span>
+                                  <span class="review-diff-prefix">{{ line.prefix }}</span>
+                                  <span class="review-diff-content">{{ line.content }}</span>
+                                </div>
+                              }
+                            </div>
                           }
 
                           <div class="p-4 space-y-3">
@@ -674,6 +731,25 @@ interface ReviewThread {
                                 Resolved
                               </span>
                             </div>
+
+                            @if (thread.diffLines.length > 0) {
+                              <div class="review-diff border-b border-border-glass" aria-label="Code context">
+                                @for (line of thread.diffLines; track $index) {
+                                  <div
+                                    class="review-diff-line"
+                                    [class.review-diff-line-add]="line.type === 'add'"
+                                    [class.review-diff-line-remove]="line.type === 'remove'"
+                                    [class.review-diff-line-context]="line.type === 'context'"
+                                  >
+                                    <span class="review-diff-number">
+                                      {{ line.lineNumber ?? '' }}
+                                    </span>
+                                    <span class="review-diff-prefix">{{ line.prefix }}</span>
+                                    <span class="review-diff-content">{{ line.content }}</span>
+                                  </div>
+                                }
+                              </div>
+                            }
 
                             <div class="p-4 space-y-3">
                               @for (comment of thread.comments; track comment.id) {
@@ -1366,6 +1442,7 @@ export class PrDetailComponent {
   readonly copiedFileName = signal<string | null>(null);
   readonly isSubmitting = signal(false);
   readonly showResolvedThreads = signal(false);
+  readonly resolvingThreadIds = signal<string[]>([]);
 
   replyText = '';
   newCommentText = '';
@@ -1470,7 +1547,12 @@ export class PrDetailComponent {
         firstValueFrom(this.api.getPrReviewThreads(owner, repo, number)),
       ]);
       this.prComments.set(comments);
-      this.reviewThreadsData.set(reviewThreads);
+      this.reviewThreadsData.set(
+        reviewThreads.map((thread) => ({
+          ...thread,
+          diffLines: this.parseDiffHunk(thread.diffHunk),
+        })),
+      );
       this.conversationsLoaded = true;
     } finally {
       this.isLoadingConversations.set(false);
@@ -1491,6 +1573,32 @@ export class PrDetailComponent {
       this.replyingTo.set(null);
     } finally {
       this.isSubmitting.set(false);
+    }
+  }
+
+  async resolveThread(threadId: string): Promise<void> {
+    if (this.isResolvingThread(threadId)) {
+      return;
+    }
+
+    this.resolvingThreadIds.update((threadIds) => [...threadIds, threadId]);
+    try {
+      await firstValueFrom(this.api.resolveReviewThread(threadId));
+      this.reviewThreadsData.update((threads) =>
+        threads.map((thread) =>
+          thread.id === threadId
+            ? {
+                ...thread,
+                isResolved: true,
+              }
+            : thread,
+        ),
+      );
+      this.reload.emit();
+    } catch (error) {
+      console.error('Failed to resolve review thread', error);
+    } finally {
+      this.resolvingThreadIds.update((threadIds) => threadIds.filter((id) => id !== threadId));
     }
   }
 
@@ -1528,8 +1636,77 @@ export class PrDetailComponent {
     return [...threads].sort((a, b) => this.threadLastTimestamp(b).localeCompare(this.threadLastTimestamp(a)));
   }
 
+  isResolvingThread(threadId: string): boolean {
+    return this.resolvingThreadIds().includes(threadId);
+  }
+
   private threadLastTimestamp(thread: ReviewThread): string {
     return thread.comments[thread.comments.length - 1]?.updated_at ?? thread.comments[0]?.created_at ?? '';
+  }
+
+  private parseDiffHunk(diffHunk: string | null): ReviewDiffLine[] {
+    if (!diffHunk) {
+      return [];
+    }
+
+    const lines = diffHunk.split('\n');
+    const parsedLines: ReviewDiffLine[] = [];
+    let oldLineNumber = 0;
+    let newLineNumber = 0;
+
+    for (const line of lines) {
+      if (!line) {
+        continue;
+      }
+
+      if (line.startsWith('@@')) {
+        const match = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+        if (match) {
+          oldLineNumber = Number(match[1]);
+          newLineNumber = Number(match[2]);
+        }
+        continue;
+      }
+
+      if (line.startsWith('\\')) {
+        continue;
+      }
+
+      const prefix = (line[0] === '+' || line[0] === '-' ? line[0] : ' ') as ReviewDiffLine['prefix'];
+      const content = line.slice(1);
+
+      if (prefix === '+') {
+        parsedLines.push({
+          lineNumber: newLineNumber++,
+          prefix,
+          content,
+          type: 'add',
+        });
+        continue;
+      }
+
+      if (prefix === '-') {
+        parsedLines.push({
+          lineNumber: oldLineNumber++,
+          prefix,
+          content,
+          type: 'remove',
+        });
+        continue;
+      }
+
+      const currentLineNumber = newLineNumber;
+      oldLineNumber += 1;
+      newLineNumber += 1;
+      parsedLines.push({
+        lineNumber: currentLineNumber,
+        prefix: ' ',
+        content,
+        type: 'context',
+      });
+    }
+
+    return parsedLines;
   }
 
   commentHtml(html: string | null | undefined, fallback: string | null | undefined): string {

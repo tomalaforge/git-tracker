@@ -225,3 +225,51 @@ input:focus, textarea:focus {
   border: 0;
   border-top: 1px solid rgba(148, 163, 184, 0.16);
 }
+
+.review-diff {
+  background: rgba(5, 18, 12, 0.92);
+  overflow-x: auto;
+}
+
+.review-diff-line {
+  align-items: flex-start;
+  display: grid;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  gap: 0.75rem;
+  grid-template-columns: 3.25rem 1rem minmax(0, 1fr);
+  line-height: 1.6;
+  padding: 0.35rem 1rem;
+  white-space: pre;
+}
+
+.review-diff-line-add {
+  background: linear-gradient(90deg, rgba(22, 101, 52, 0.42), rgba(22, 101, 52, 0.2));
+  color: #d1fae5;
+}
+
+.review-diff-line-remove {
+  background: linear-gradient(90deg, rgba(127, 29, 29, 0.32), rgba(127, 29, 29, 0.16));
+  color: #fecaca;
+}
+
+.review-diff-line-context {
+  background: rgba(15, 23, 42, 0.6);
+  color: #cbd5e1;
+}
+
+.review-diff-number {
+  color: rgba(255, 255, 255, 0.46);
+  text-align: right;
+  user-select: none;
+}
+
+.review-diff-prefix {
+  color: rgba(255, 255, 255, 0.72);
+  text-align: center;
+  user-select: none;
+}
+
+.review-diff-content {
+  overflow-x: auto;
+}

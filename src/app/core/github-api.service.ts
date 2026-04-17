@@ -287,6 +287,33 @@ export class GitHubApiService {
   }
 
   /**
+   * Resolve a pull request review thread.
+   */
+  resolveReviewThread(threadId: string): Observable<void> {
+    const mutation = `
+      mutation($threadId: ID!) {
+        resolveReviewThread(input: { threadId: $threadId }) {
+          thread {
+            id
+            isResolved
+          }
+        }
+      }
+    `;
+
+    return this.http
+      .post<any>(`${API_BASE}/graphql`, { query: mutation, variables: { threadId } })
+      .pipe(
+        map((res) => {
+          if (res?.errors?.length) {
+            throw new Error(res.errors[0]?.message || 'Failed to resolve review thread.');
+          }
+          return undefined;
+        }),
+      );
+  }
+
+  /**
    * Update a pull request's title and/or body.
    */
   updatePullRequest(

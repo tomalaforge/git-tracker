@@ -603,6 +603,30 @@ export class DashboardService {
     }
   }
 
+  async rerunAllForPr(prId: number): Promise<void> {
+    const index = this._prList().findIndex((p) => p.pr.id === prId);
+    if (index === -1) return;
+
+    const item = this._prList()[index];
+    const allRuns = await this.ciService.loadAllWorkflowRuns(item.pr);
+    const [owner, repo] = [item.pr.base.repo.owner.login, item.pr.base.repo.name];
+
+    for (const run of allRuns) {
+      await this.ciService.rerunWorkflow(owner, repo, run.id);
+    }
+
+    this._prList.update((list) => {
+      const updated = [...list];
+      updated[index] = {
+        ...updated[index],
+        ciStatus: 'pending',
+        failedJobs: [],
+        failedRuns: [],
+      };
+      return updated;
+    });
+  }
+
   async rerunFailedJobs(prIndex: number, runId: number, repoFullName: string): Promise<boolean> {
     const [owner, repo] = repoFullName.split('/');
     const success = await this.ciService.rerunFailedJobs(owner, repo, runId);

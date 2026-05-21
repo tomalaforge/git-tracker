@@ -95,6 +95,22 @@ import { AuthService } from '../auth';
                   </span>
                 }
 
+                <!-- Git pull master -->
+                <button
+                  (click)="onGitPullMaster()"
+                  [disabled]="isPullingMaster()"
+                  class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-bg-glass border border-border-glass hover:border-border-hover
+                         text-text-secondary hover:text-text-primary transition-all cursor-pointer
+                         disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
+                  title="Run git pull on local rosa-v1 master">
+                  <svg class="w-3.5 h-3.5" [class.animate-spin-slow]="isPullingMaster()"
+                    fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                  </svg>
+                  <span class="text-[11px] font-medium">git pull master</span>
+                </button>
+
                 <!-- Refresh all -->
                 <button
                   (click)="onRefreshAll()"
@@ -224,6 +240,7 @@ import { AuthService } from '../auth';
                 (reload)="onReloadPr(dashboard.selectedPr()!.pr.id)"
                 (merge)="onMergePr(dashboard.selectedPr()!.pr.id)"
                 (rerunAllFailed)="onRerunFailedForPr(dashboard.selectedPr()!.pr.id)"
+                (rerunAllCi)="onRerunAllForPr(dashboard.selectedPr()!.pr.id)"
                 (rerunJob)="onRerunSingleJob($event)"
                 (prDetailsUpdated)="onPrDetailsUpdated(dashboard.selectedPr()!.pr.id, $event)" />
             } @else {
@@ -252,6 +269,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   private readonly router = inject(Router);
 
   authorFilterInput = '';
+  readonly isPullingMaster = signal(false);
 
   constructor() {
     // Re-validate or start loading PRs only when authenticated
@@ -273,6 +291,25 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   onRefreshAll(): void {
     this.dashboard.loadPullRequests();
+  }
+
+  async onGitPullMaster(): Promise<void> {
+    const electronAPI = (window as any).electronAPI;
+    if (!electronAPI?.gitPullMaster) {
+      alert('git pull is only available in the desktop app.');
+      return;
+    }
+    this.isPullingMaster.set(true);
+    try {
+      const result = await electronAPI.gitPullMaster();
+      if (result?.success) {
+        alert(`git pull succeeded:\n\n${result.output || '(no output)'}`);
+      } else {
+        alert(`git pull failed:\n\n${result?.output ?? 'Unknown error'}`);
+      }
+    } finally {
+      this.isPullingMaster.set(false);
+    }
   }
 
   onApplyAuthorFilter(): void {
@@ -303,6 +340,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   async onRerunFailedForPr(prId: number): Promise<void> {
     await this.dashboard.rerunFailedForPr(prId);
+  }
+
+  async onRerunAllForPr(prId: number): Promise<void> {
+    await this.dashboard.rerunAllForPr(prId);
   }
 
   async onRerunSingleJob(event: { runId: number; repoFullName: string }): Promise<void> {

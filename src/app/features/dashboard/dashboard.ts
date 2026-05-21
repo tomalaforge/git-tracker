@@ -303,9 +303,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
     try {
       const result = await electronAPI.gitPullMaster();
       if (result?.success) {
-        alert(`git pull succeeded:\n\n${result.output || '(no output)'}`);
+        alert('git pull succeeded');
       } else {
-        alert(`git pull failed:\n\n${result?.output ?? 'Unknown error'}`);
+        alert('git pull failed');
       }
     } finally {
       this.isPullingMaster.set(false);

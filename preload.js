@@ -5,4 +5,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveToken: (token) => ipcRenderer.invoke('save-token', token),
   loadToken: () => ipcRenderer.invoke('load-token'),
   clearToken: () => ipcRenderer.invoke('clear-token'),
+  gitPullMaster: () => ipcRenderer.invoke('git-pull-master'),
 });

@@ -126,4 +126,32 @@ export class CiStatusService {
       return false;
     }
   }
+
+  /**
+   * Rerun an entire workflow run.
+   */
+  async rerunWorkflow(owner: string, repo: string, runId: number): Promise<boolean> {
+    try {
+      await firstValueFrom(this.api.rerunWorkflow(owner, repo, runId)) as any;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Load all workflow runs for a PR's head SHA.
+   */
+  async loadAllWorkflowRuns(pr: PullRequest): Promise<WorkflowRun[]> {
+    const owner = pr.base.repo.owner.login;
+    const repo = pr.base.repo.name;
+    const sha = pr.head.sha;
+
+    try {
+      const result = (await firstValueFrom(this.api.getWorkflowRuns(owner, repo, sha))) as { workflow_runs: WorkflowRun[] };
+      return result.workflow_runs;
+    } catch {
+      return [];
+    }
+  }
 }

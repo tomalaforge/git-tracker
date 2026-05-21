@@ -1005,26 +1005,48 @@ interface ReviewThread {
                     </a>
                   }
                 </div>
-                <button
-                  (click)="rerunAllFailed.emit()"
-                  [disabled]="!isCiComplete()"
-                  [title]="rerunTooltip()"
-                  class="px-3 py-1.5 text-xs font-medium bg-gradient-to-r from-amber-500 to-orange-600 text-white
-                       rounded-lg hover:from-amber-600 hover:to-orange-700 active:scale-95
-                       transition-all shadow-lg shadow-amber-500/20 cursor-pointer flex items-center gap-1.5
-                       disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:from-amber-500
-                       disabled:hover:to-orange-600 disabled:active:scale-100"
-                >
-                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                    />
-                  </svg>
-                  Rerun All Failed
-                </button>
+                <div class="flex items-center gap-2">
+                  <button
+                    (click)="rerunAllFailed.emit()"
+                    [disabled]="!isCiComplete()"
+                    [title]="rerunTooltip()"
+                    class="px-3 py-1.5 text-xs font-medium bg-gradient-to-r from-amber-500 to-orange-600 text-white
+                         rounded-lg hover:from-amber-600 hover:to-orange-700 active:scale-95
+                         transition-all shadow-lg shadow-amber-500/20 cursor-pointer flex items-center gap-1.5
+                         disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:from-amber-500
+                         disabled:hover:to-orange-600 disabled:active:scale-100"
+                  >
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                      />
+                    </svg>
+                    Rerun All Failed
+                  </button>
+                  <button
+                    (click)="rerunAllCi.emit()"
+                    [disabled]="!isCiComplete()"
+                    [title]="rerunTooltip()"
+                    class="px-3 py-1.5 text-xs font-medium bg-gradient-to-r from-blue-500 to-indigo-600 text-white
+                         rounded-lg hover:from-blue-600 hover:to-indigo-700 active:scale-95
+                         transition-all shadow-lg shadow-blue-500/20 cursor-pointer flex items-center gap-1.5
+                         disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:from-blue-500
+                         disabled:hover:to-indigo-600 disabled:active:scale-100"
+                  >
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                      />
+                    </svg>
+                    Rerun All
+                  </button>
+                </div>
               </div>
 
               <!-- Failed jobs list -->
@@ -1424,6 +1446,7 @@ export class PrDetailComponent {
   readonly reload = output<void>();
   readonly merge = output<void>();
   readonly rerunAllFailed = output<void>();
+  readonly rerunAllCi = output<void>();
   readonly copyLink = output<string>();
   readonly rerunJob = output<{ runId: number; repoFullName: string }>();
   readonly prDetailsUpdated = output<{ title: string; body: string }>();

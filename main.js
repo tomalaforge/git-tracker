@@ -1,6 +1,7 @@
 const { app, BrowserWindow, shell, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { exec } = require('child_process');
 
 let win;
 let appQuitting = false;
@@ -89,6 +90,22 @@ ipcMain.handle('load-token', () => {
     console.error('Failed to load token', err);
   }
   return null;
+});
+
+ipcMain.handle('git-pull-master', () => {
+  return new Promise((resolve) => {
+    exec(
+      'git pull',
+      { cwd: '/Users/thomaslaforge/Documents/Project/conductor/rosa-v1' },
+      (err, stdout, stderr) => {
+        if (err) {
+          resolve({ success: false, output: stderr || err.message });
+        } else {
+          resolve({ success: true, output: stdout || stderr });
+        }
+      },
+    );
+  });
 });
 
 ipcMain.handle('clear-token', () => {

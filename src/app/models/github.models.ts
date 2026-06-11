@@ -93,6 +93,18 @@ export interface WorkflowJob {
   }>;
 }
 
+export interface WorkflowArtifact {
+  id: number;
+  name: string;
+  size_in_bytes: number;
+  expired: boolean;
+  created_at: string;
+  workflow_run: {
+    id: number;
+    head_sha: string;
+  } | null;
+}
+
 export interface CheckAnnotation {
   path: string;
   start_line: number;

@@ -8,6 +8,7 @@ import {
   ParsedTestFailure,
 } from '../../models';
 import { CiBadgeComponent } from '../ci-status/ci-badge';
+import { CoverageReportComponent } from './coverage-report';
 import { GitHubApiService } from '../../core';
 import { firstValueFrom } from 'rxjs';
 
@@ -48,7 +49,7 @@ interface ReviewThread {
 @Component({
   selector: 'gt-pr-detail',
   standalone: true,
-  imports: [CiBadgeComponent, DatePipe, FormsModule],
+  imports: [CiBadgeComponent, CoverageReportComponent, DatePipe, FormsModule],
   template: `
     <div class="h-full flex flex-col">
       <!-- PR header -->
@@ -355,6 +356,17 @@ interface ReviewThread {
               {{ reviewCommentCount() }} / {{ totalComments() }}
             </span>
           }
+        </button>
+        <button
+          (click)="activeTab.set('coverage')"
+          class="px-5 py-2.5 text-xs font-medium transition-colors cursor-pointer border-b-2"
+          [class.border-accent]="activeTab() === 'coverage'"
+          [class.text-accent]="activeTab() === 'coverage'"
+          [class.border-transparent]="activeTab() !== 'coverage'"
+          [class.text-text-muted]="activeTab() !== 'coverage'"
+          [class.hover:text-text-primary]="activeTab() !== 'coverage'"
+        >
+          Coverage
         </button>
         <button
           (click)="activeTab.set('details')"
@@ -835,6 +847,9 @@ interface ReviewThread {
               </div>
             }
           </div>
+        } @else if (activeTab() === 'coverage') {
+          <!-- Coverage tab -->
+          <gt-coverage-report [pr]="pr().pr" [active]="activeTab() === 'coverage'" />
         } @else {
           @if (pr().isLoading && pr().checkRuns.length === 0) {
             <!-- Loading state -->
@@ -1455,7 +1470,7 @@ export class PrDetailComponent {
   readonly slackCopied = signal(false);
   readonly reviewersAdded = signal(false);
   readonly isAddingReviewers = signal(false);
-  readonly activeTab = signal<'ci' | 'conversations' | 'details'>('ci');
+  readonly activeTab = signal<'ci' | 'conversations' | 'coverage' | 'details'>('ci');
 
   // Conversations state
   readonly prComments = signal<any[]>([]);

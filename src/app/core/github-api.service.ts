@@ -8,6 +8,7 @@ import {
   WorkflowRun,
   WorkflowJob,
   CheckAnnotation,
+  WorkflowArtifact,
 } from '../models';
 
 const API_BASE = 'https://api.github.com';
@@ -88,6 +89,24 @@ export class GitHubApiService {
     const params = new HttpParams().set('per_page', '100').set('filter', 'latest');
     return this.http.get<{ total_count: number; jobs: WorkflowJob[] }>(
       `${API_BASE}/repos/${owner}/${repo}/actions/runs/${runId}/jobs`,
+      { params },
+    );
+  }
+
+  /**
+   * List artifacts for a repository, optionally filtered by name.
+   */
+  listArtifacts(
+    owner: string,
+    repo: string,
+    name?: string,
+  ): Observable<{ total_count: number; artifacts: WorkflowArtifact[] }> {
+    let params = new HttpParams().set('per_page', '100');
+    if (name) {
+      params = params.set('name', name);
+    }
+    return this.http.get<{ total_count: number; artifacts: WorkflowArtifact[] }>(
+      `${API_BASE}/repos/${owner}/${repo}/actions/artifacts`,
       { params },
     );
   }

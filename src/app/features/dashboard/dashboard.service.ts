@@ -11,6 +11,7 @@ interface PrActivitySnapshot {
   checkRuns: CheckRun[];
   ciStatus: CIStatus;
   reviewStatus: ReviewStatus;
+  hasConflicts: boolean;
   discussionStatus: DiscussionStatus;
   latestCommentFingerprint: string | null;
   latestCommentAuthor: string | null;
@@ -152,6 +153,7 @@ export class DashboardService {
             ciStatus: 'unknown',
             reviewStatus: 'PENDING',
             isMergeable: false,
+            hasConflicts: false,
             discussionStatus: 'NONE',
             latestCommentFingerprint: null,
             checkRuns: [],
@@ -351,6 +353,7 @@ export class DashboardService {
             ciStatus: 'unknown',
             reviewStatus: 'PENDING',
             isMergeable: false,
+            hasConflicts: false,
             discussionStatus: 'NONE',
             latestCommentFingerprint: null,
             checkRuns: [],
@@ -409,6 +412,7 @@ export class DashboardService {
     if (a.reviewStatus !== b.reviewStatus) return false;
     if (a.discussionStatus !== b.discussionStatus) return false;
     if (a.isMergeable !== b.isMergeable) return false;
+    if (a.hasConflicts !== b.hasConflicts) return false;
     
     // 3. Unseen flags
     if (a.unseenApproval !== b.unseenApproval) return false;
@@ -443,6 +447,13 @@ export class DashboardService {
       const repoFullName = item.pr.base.repo.full_name;
       const [owner, repo] = repoFullName.split('/');
 
+      // mergeable_state + requested_reviewers only live on the full PR object (the
+      // search payload omits them) and only change when a new commit moves the head
+      // SHA. So refetch the full PR only on a head change; otherwise reuse the cached
+      // values to avoid an extra request per PR on every sync.
+      const previous = this._prList().find((p) => p.pr.id === item.pr.id);
+      const headChanged = !!previous && previous.pr.head.sha !== item.pr.head.sha;
+
       const [checkRuns, reviews, discussionStatusData] = await Promise.all([
         this.ciService.loadCheckRuns(item.pr),
         firstValueFrom(this.api.getReviews(owner, repo, item.pr.number)) as Promise<any[]>,
@@ -451,12 +462,32 @@ export class DashboardService {
         }>,
       ]);
 
+      let fullPr: PullRequest;
+      if (headChanged) {
+        fullPr = (await firstValueFrom(this.api.getPullRequest(owner, repo, item.pr.number))) as PullRequest;
+      } else if (previous) {
+        // Head unchanged — keep the conflict/reviewer state we already know.
+        fullPr = {
+          ...item.pr,
+          mergeable_state: previous.pr.mergeable_state,
+          requested_reviewers: previous.pr.requested_reviewers ?? [],
+        };
+      } else {
+        // Brand-new PR: syncPullRequests already fetched its full data.
+        fullPr = item.pr;
+      }
+
       const isSelected = this._selectedPrId() === item.pr.id;
 
       const newCiStatus = this.ciService.computeCIStatus(checkRuns);
       const newDiscussionStatus = this.computeDiscussionStatus(discussionStatusData.unresolvedThreads);
       const hasOpenDiscussions = newDiscussionStatus !== 'NONE';
-      const newReviewStatus = this.computeReviewStatus(reviews, hasOpenDiscussions);
+      const newReviewStatus = this.computeReviewStatus(
+        reviews,
+        hasOpenDiscussions,
+        fullPr.requested_reviewers ?? [],
+      );
+      const hasConflicts = fullPr.mergeable_state === 'dirty';
 
       let unseenCiFinish = item.unseenCiFinish;
       let unseenApproval = item.unseenApproval;
@@ -510,6 +541,7 @@ export class DashboardService {
 
       return {
         ...item,
+        pr: fullPr,
         checkRuns,
         ciStatus: newCiStatus,
         reviewStatus: newReviewStatus,
@@ -517,7 +549,8 @@ export class DashboardService {
         unseenCiFinish,
         unseenApproval,
         unseenDiscussions,
-        isMergeable: newCiStatus === 'success' && newReviewStatus === 'APPROVED' && !item.pr.draft,
+        isMergeable: newCiStatus === 'success' && newReviewStatus === 'APPROVED' && !fullPr.draft,
+        hasConflicts,
         failedRuns,
         failedJobs,
         isLoading: false,
@@ -721,13 +754,18 @@ export class DashboardService {
     ]);
 
     const discussionStatus = this.computeDiscussionStatus(discussionStatusData.unresolvedThreads);
-    const reviewStatus = this.computeReviewStatus(reviews, discussionStatus !== 'NONE');
+    const reviewStatus = this.computeReviewStatus(
+      reviews,
+      discussionStatus !== 'NONE',
+      pr.requested_reviewers ?? [],
+    );
     const latestComment = this.findLatestComment(prComments, reviewComments, reviews);
 
     return {
       checkRuns,
       ciStatus: this.ciService.computeCIStatus(checkRuns),
       reviewStatus,
+      hasConflicts: pr.mergeable_state === 'dirty',
       discussionStatus,
       latestCommentFingerprint: latestComment?.fingerprint ?? null,
       latestCommentAuthor: latestComment?.author ?? null,
@@ -777,6 +815,7 @@ export class DashboardService {
       unseenApproval,
       unseenDiscussions,
       isMergeable: snapshot.ciStatus === 'success' && snapshot.reviewStatus === 'APPROVED' && !pr.draft,
+      hasConflicts: snapshot.hasConflicts,
       failedRuns,
       failedJobs,
       isLoading: false,
@@ -793,6 +832,7 @@ export class DashboardService {
       currentItem.unseenApproval !== nextItem.unseenApproval ||
       currentItem.unseenDiscussions !== nextItem.unseenDiscussions ||
       currentItem.isMergeable !== nextItem.isMergeable ||
+      currentItem.hasConflicts !== nextItem.hasConflicts ||
       currentItem.isLoading !== nextItem.isLoading ||
       currentItem.checkRuns !== nextItem.checkRuns ||
       currentItem.failedRuns !== nextItem.failedRuns ||
@@ -866,13 +906,19 @@ export class DashboardService {
     });
   }
 
-  private computeReviewStatus(reviews: any[], hasOpenDiscussions: boolean): ReviewStatus {
-    if (reviews.length === 0) {
-      return hasOpenDiscussions ? 'PENDING' : 'PENDING'; // Wait, if no reviews, it's pending.
-    }
+  private computeReviewStatus(
+    reviews: any[],
+    hasOpenDiscussions: boolean,
+    requestedReviewers: Array<{ login: string }> = [],
+  ): ReviewStatus {
+    // Reviewers currently sitting in `requested_reviewers` have been (re-)requested
+    // — typically because a new commit landed after their review. GitHub treats their
+    // previous verdict as stale, so we ignore it here ("uncheck" them).
+    const reRequested = new Set(requestedReviewers.map((r) => r.login));
 
     const lastReviews = new Map<string, string>();
     for (const r of reviews) {
+      if (reRequested.has(r.user.login)) continue;
       lastReviews.set(r.user.login, r.state);
     }
 

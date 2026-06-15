@@ -135,6 +135,8 @@ export interface PullRequestWithStatus {
   ciStatus: CIStatus;
   reviewStatus: ReviewStatus;
   isMergeable: boolean;
+  /** True when GitHub reports the PR has merge conflicts (mergeable_state === 'dirty'). */
+  hasConflicts: boolean;
   discussionStatus: 'NONE' | 'REPLIED' | 'NEW_CONTENT';
   latestCommentFingerprint: string | null;
   checkRuns: CheckRun[];

@@ -155,6 +155,16 @@ export class GitHubApiService {
   }
 
   /**
+   * Cancel a workflow run.
+   */
+  cancelWorkflowRun(owner: string, repo: string, runId: number): Observable<void> {
+    return this.http.post<void>(
+      `${API_BASE}/repos/${owner}/${repo}/actions/runs/${runId}/cancel`,
+      {},
+    );
+  }
+
+  /**
    * Get reviews for a pull request.
    */
   getReviews(owner: string, repo: string, prNumber: number): Observable<any[]> {
@@ -328,6 +338,67 @@ export class GitHubApiService {
             throw new Error(res.errors[0]?.message || 'Failed to resolve review thread.');
           }
           return undefined;
+        }),
+      );
+  }
+
+  /**
+   * Mark a draft pull request as ready for review.
+   *
+   * REST has no endpoint for this — it's only exposed via the GraphQL
+   * `markPullRequestReadyForReview` mutation, so we resolve the PR node id
+   * first and then run the mutation, same two-step shape as `requestReviewers`.
+   */
+  markPullRequestReadyForReview(
+    owner: string,
+    repo: string,
+    prNumber: number,
+  ): Observable<void> {
+    const lookup = `
+      query($owner: String!, $repo: String!, $number: Int!) {
+        repository(owner: $owner, name: $repo) {
+          pullRequest(number: $number) { id }
+        }
+      }
+    `;
+
+    return this.http
+      .post<any>(`${API_BASE}/graphql`, {
+        query: lookup,
+        variables: { owner, repo, number: prNumber },
+      })
+      .pipe(
+        switchMap((res) => {
+          if (res?.errors?.length) {
+            throw new Error(res.errors[0]?.message || 'Failed to resolve pull request.');
+          }
+          const pullRequestId = res?.data?.repository?.pullRequest?.id;
+          if (!pullRequestId) {
+            throw new Error('Could not resolve pull request.');
+          }
+
+          const mutation = `
+            mutation($pullRequestId: ID!) {
+              markPullRequestReadyForReview(input: { pullRequestId: $pullRequestId }) {
+                pullRequest { id }
+              }
+            }
+          `;
+          return this.http
+            .post<any>(`${API_BASE}/graphql`, {
+              query: mutation,
+              variables: { pullRequestId },
+            })
+            .pipe(
+              map((mutationRes) => {
+                if (mutationRes?.errors?.length) {
+                  throw new Error(
+                    mutationRes.errors[0]?.message || 'Failed to mark pull request ready for review.',
+                  );
+                }
+                return undefined;
+              }),
+            );
         }),
       );
   }

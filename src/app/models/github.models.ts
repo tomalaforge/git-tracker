@@ -44,7 +44,13 @@ export interface PullRequest {
   }>;
 }
 
-export type CIStatus = 'success' | 'failure' | 'pending' | 'neutral' | 'unknown';
+export type CIStatus =
+  | 'success'
+  | 'failure'
+  | 'pending'
+  | 'neutral'
+  | 'unknown'
+  | 'action_required';
 
 export interface CheckRun {
   id: number;

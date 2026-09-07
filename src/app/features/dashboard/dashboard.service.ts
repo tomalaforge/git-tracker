@@ -59,6 +59,19 @@ export class DashboardService {
 
   private pendingRefreshInterval: ReturnType<typeof setInterval> | null = null;
   private activityRefreshInterval: ReturnType<typeof setInterval> | null = null;
+  /** Guards against overlapping full syncs (a slow sync + the next timer tick). */
+  private isSyncing = false;
+  /**
+   * prId → epoch ms of the last local optimistic mutation (e.g. adding
+   * reviewers). A background sync that began fetching BEFORE the mutation
+   * carries stale data; we use this to skip clobbering the fresh local state
+   * and avoid the card flickering back to its old status.
+   */
+  private readonly localMutations = new Map<number, number>();
+
+  private markLocalMutation(prId: number): void {
+    this.localMutations.set(prId, Date.now());
+  }
 
   constructor() {
     this.requestNotificationPermission();
@@ -118,6 +131,10 @@ export class DashboardService {
 
   setFilterAuthor(author: string | null): void {
     this._filterAuthor.set(author);
+  }
+
+  clearError(): void {
+    this._error.set(null);
   }
 
   /**
@@ -230,6 +247,65 @@ export class DashboardService {
     this.updateRateLimit();
   }
 
+  /** The standard set of reviewers added via the "Add reviewers" button. */
+  private readonly standardReviewers = ['Betrozov', 'Mathieu-JJ', 'MaximeSohetRosa'];
+
+  /**
+   * Request the standard reviewers on a PR. Updates the card optimistically so
+   * the reviewer icon appears immediately and stays put — no full reload, and
+   * background syncs that are mid-flight won't flicker it back (see
+   * `localMutations`). The next sync reconciles the authoritative state.
+   */
+  async addStandardReviewers(prId: number): Promise<void> {
+    const index = this._prList().findIndex((p) => p.pr.id === prId);
+    if (index === -1) return;
+
+    const item = this._prList()[index];
+    const [owner, repo] = item.pr.base.repo.full_name.split('/');
+
+    const existing = item.pr.requested_reviewers ?? [];
+    const existingLogins = new Set(existing.map((r) => r.login));
+    const merged = [
+      ...existing,
+      ...this.standardReviewers
+        .filter((login) => !existingLogins.has(login))
+        .map((login) => ({ login, avatar_url: '' })),
+    ];
+
+    this.markLocalMutation(prId);
+    this._prList.update((list) => {
+      const idx = list.findIndex((p) => p.pr.id === prId);
+      if (idx === -1) return list;
+      const updated = [...list];
+      updated[idx] = {
+        ...updated[idx],
+        pr: { ...updated[idx].pr, requested_reviewers: merged },
+      };
+      return updated;
+    });
+
+    try {
+      await firstValueFrom(
+        this.api.requestReviewers(owner, repo, item.pr.number, this.standardReviewers),
+      );
+      // Re-stamp so a sync that started during the request still defers to us.
+      this.markLocalMutation(prId);
+    } catch (err) {
+      // Roll back the optimistic reviewers; the next sync will resolve the truth.
+      this.markLocalMutation(prId);
+      this._prList.update((list) => {
+        const idx = list.findIndex((p) => p.pr.id === prId);
+        if (idx === -1) return list;
+        const updated = [...list];
+        updated[idx] = {
+          ...updated[idx],
+          pr: { ...updated[idx].pr, requested_reviewers: existing },
+        };
+        return updated;
+      });
+    }
+  }
+
   /**
    * Merge a pull request.
    */
@@ -274,6 +350,55 @@ export class DashboardService {
   }
 
   /**
+   * Mark a draft pull request as ready for review. Updates the card
+   * optimistically (clearing `draft` and recomputing `isMergeable`) the same
+   * way `addStandardReviewers` does, so the "Ready for review" button
+   * disappears immediately instead of waiting for the next sync.
+   */
+  async markReadyForReview(prId: number): Promise<void> {
+    const index = this._prList().findIndex((p) => p.pr.id === prId);
+    if (index === -1) return;
+
+    const item = this._prList()[index];
+    const [owner, repo] = item.pr.base.repo.full_name.split('/');
+
+    this.markLocalMutation(prId);
+    this._prList.update((list) => {
+      const idx = list.findIndex((p) => p.pr.id === prId);
+      if (idx === -1) return list;
+      const updated = [...list];
+      const pr = { ...updated[idx].pr, draft: false };
+      updated[idx] = {
+        ...updated[idx],
+        pr,
+        isMergeable: updated[idx].ciStatus === 'success' && updated[idx].reviewStatus === 'APPROVED',
+      };
+      return updated;
+    });
+
+    try {
+      await firstValueFrom(this.api.markPullRequestReadyForReview(owner, repo, item.pr.number));
+      this.markLocalMutation(prId);
+    } catch (err: any) {
+      const msg = err?.error?.message || err?.message || 'Failed to mark pull request ready for review.';
+      this._error.set(msg);
+
+      this.markLocalMutation(prId);
+      this._prList.update((list) => {
+        const idx = list.findIndex((p) => p.pr.id === prId);
+        if (idx === -1) return list;
+        const updated = [...list];
+        updated[idx] = {
+          ...updated[idx],
+          pr: { ...updated[idx].pr, draft: true },
+          isMergeable: false,
+        };
+        return updated;
+      });
+    }
+  }
+
+  /**
    * Fast refresh for PRs with running CI.
    */
   async refreshPendingPrActivity(): Promise<void> {
@@ -312,90 +437,166 @@ export class DashboardService {
   async syncPullRequests(): Promise<void> {
     const user = this.auth.user();
     if (!user) return;
+    // Skip if a previous sync is still in flight — overlapping syncs commit
+    // out-of-order snapshots and make cards flicker / jump to older states.
+    if (this.isSyncing) return;
+    this.isSyncing = true;
+    // Anything mutated locally after this instant is fresher than the snapshot
+    // this sync is about to fetch, so we won't overwrite it at commit time.
+    const syncStartedAt = Date.now();
     this.updateRateLimit();
 
     const author = this._filterAuthor() ?? user.login;
     try {
       const searchResult = (await firstValueFrom(this.api.searchUserPullRequests(author, 'rosahealth/rosa'))) as { items: PullRequest[] };
       const searchItems = searchResult.items;
-      
+
       const currentPrs = this._prList();
-      const currentMap = new Map(currentPrs.map(p => [p.pr.id, p]));
-      const searchIds = new Set(searchItems.map(item => item.id));
+      // IMPORTANT: the search hits /search/issues, so `item.id` is the ISSUE id,
+      // which differs from the PR id (`pr.id`). Match on a stable `repo#number`
+      // key instead, or every PR looks "new" and the list gets wiped.
+      const currentMap = new Map(currentPrs.map((p) => [this.prKey(p.pr), p]));
+      const searchKeys = new Set(
+        searchItems.map((item) => this.searchKey(item)).filter((k): k is string => k !== null),
+      );
 
-      // 1. Prepare initial list with most recent PR metadata
-      let updatedList: PullRequestWithStatus[] = [];
-      const newItems: any[] = [];
-
+      // ---- Build LIST 2: the freshly fetched PRs with up-to-date status. ----
+      // Existing PRs reuse the rich object we already hold (carrying base/head/
+      // requested_reviewers the search omits) with refreshed display vitals;
+      // brand-new PRs get a full fetch. We do NOT touch the on-screen list here.
+      const toFetch: PullRequestWithStatus[] = [];
       for (const item of searchItems) {
-        const existing = currentMap.get(item.id);
+        const key = this.searchKey(item);
+        const existing = key ? currentMap.get(key) : undefined;
         if (existing) {
-          // Keep existing but with updated PR vitals (title, body, updated_at)
-          updatedList.push({ ...existing, pr: item });
+          toFetch.push({
+            ...existing,
+            pr: {
+              ...existing.pr,
+              title: item.title,
+              body: item.body,
+              updated_at: item.updated_at,
+            },
+          });
         } else {
-          // It's a new PR
-          newItems.push(item);
+          const shell = await this.buildNewPrShell(item);
+          if (shell) toFetch.push(shell);
         }
       }
 
-      // 2. Fetch full data for NEW items
-      for (const item of newItems) {
-        const repoFullName = this.extractRepoFromUrl(item.html_url);
-        if (!repoFullName) continue;
-        const [owner, repo] = repoFullName.split('/');
-        const prNumber = this.extractPrNumber(item.html_url);
-        if (!prNumber) continue;
-
-        try {
-          const fullPr = await firstValueFrom(this.api.getPullRequest(owner, repo, prNumber)) as PullRequest;
-          updatedList.push({
-            pr: fullPr,
-            ciStatus: 'unknown',
-            reviewStatus: 'PENDING',
-            isMergeable: false,
-            hasConflicts: false,
-            discussionStatus: 'NONE',
-            latestCommentFingerprint: null,
-            checkRuns: [],
-            failedRuns: [],
-            failedJobs: [],
-            isLoading: false, // Don't show loader for background sync
-            isMerging: false,
-            unseenDiscussions: false,
-            unseenApproval: false,
-            unseenCiFinish: false,
-          });
-        } catch { /* skip */ }
-      }
-
-      // Re-sort if list changed
-      updatedList.sort((a, b) => new Date(b.pr.updated_at).getTime() - new Date(a.pr.updated_at).getTime());
-
-      // 3. Refresh status for ALL active PRs in parallel (in-memory)
-      // Determine if a PR is new (wasn't in currentMap) vs existing
-      const refreshedList = await Promise.all(
-        updatedList.map((item) => {
-          const isNew = !currentMap.has(item.pr.id);
-          return this.loadUpdatedPrStatus(item, !isNew);
-        }),
+      const fetched = await Promise.all(
+        toFetch.map((item) => this.loadUpdatedPrStatus(item, currentMap.has(this.prKey(item.pr)))),
       );
 
-      // 4. Final Comparison for atomic update
-      if (this.areListsEffectivelyDifferent(currentPrs, refreshedList)) {
-        this._prList.set(refreshedList);
-        this._lastRefresh.set(new Date());
+      // Index LIST 2 by key, keeping only PRs still open (loadUpdatedPrStatus
+      // refetched the authoritative full PR, so we trust its `state`).
+      const fetchedByKey = new Map<string, PullRequestWithStatus>();
+      for (const item of fetched) {
+        if (item.pr.state === 'open') fetchedByKey.set(this.prKey(item.pr), item);
       }
+
+      // ---- Reconcile LIST 1 (on-screen) against LIST 2, IN PLACE. ----
+      // Walk the displayed list in its existing order and update each PR's status
+      // from the fetched data ONLY where something actually changed. A PR is never
+      // moved; unchanged PRs keep their exact object reference (so their card
+      // doesn't even re-render). New PRs are prepended at the top; merged/closed
+      // ones are dropped. The existing list is never rebuilt from the fetch order,
+      // so it can't reorder.
+      this._prList.update((live) => {
+        let changed = false;
+        const existing: PullRequestWithStatus[] = [];
+
+        for (const current of live) {
+          const key = this.prKey(current.pr);
+          // Gone from search → merged/closed. Drop it (this leaves the others in
+          // place, so it's a removal, not a reorder).
+          if (!searchKeys.has(key)) {
+            changed = true;
+            continue;
+          }
+          const fresh = fetchedByKey.get(key);
+          if (!fresh) {
+            // In search but the refetch found it closed (or failed) → drop.
+            changed = true;
+            continue;
+          }
+
+          // A local optimistic mutation landed while this sync was fetching — the
+          // live card is fresher than our snapshot, so leave it untouched.
+          const mutatedAt = this.localMutations.get(current.pr.id);
+          if (mutatedAt !== undefined && mutatedAt >= syncStartedAt) {
+            existing.push(current);
+            continue;
+          }
+
+          const candidate = current.isMerging ? { ...fresh, isMerging: true } : fresh;
+          if (this.arePrsEffectivelyEqual(current, candidate)) {
+            existing.push(current); // nothing changed → keep the same reference
+          } else {
+            existing.push(candidate); // update status only, same position
+            changed = true;
+          }
+        }
+
+        // Brand-new PRs (present in the fetch, absent on screen) go on TOP, in the
+        // search's order (newest first), without disturbing the existing order.
+        const liveKeys = new Set(live.map((p) => this.prKey(p.pr)));
+        const fresh: PullRequestWithStatus[] = [];
+        for (const item of searchItems) {
+          const key = this.searchKey(item);
+          if (!key || liveKeys.has(key)) continue;
+          const item2 = fetchedByKey.get(key);
+          if (item2) {
+            fresh.push(item2);
+            changed = true;
+          }
+        }
+
+        return changed ? [...fresh, ...existing] : live;
+      });
+      this._lastRefresh.set(new Date());
     } catch (err) {
       // background sync fail
+    } finally {
+      this.isSyncing = false;
     }
   }
 
-  private areListsEffectivelyDifferent(a: PullRequestWithStatus[], b: PullRequestWithStatus[]): boolean {
-    if (a.length !== b.length) return true;
-    for (let i = 0; i < a.length; i++) {
-      if (!this.arePrsEffectivelyEqual(a[i], b[i])) return true;
+  /**
+   * Build a fresh PullRequestWithStatus shell for a PR the search returned but we
+   * don't yet have on screen. Fetches the full PR so loadUpdatedPrStatus has the
+   * head SHA / base repo it needs. Returns null if the PR can't be resolved.
+   */
+  private async buildNewPrShell(item: PullRequest): Promise<PullRequestWithStatus | null> {
+    const repoFullName = this.extractRepoFromUrl(item.html_url);
+    const prNumber = this.extractPrNumber(item.html_url);
+    if (!repoFullName || !prNumber) return null;
+    const [owner, repo] = repoFullName.split('/');
+
+    try {
+      const fullPr = (await firstValueFrom(
+        this.api.getPullRequest(owner, repo, prNumber),
+      )) as PullRequest;
+      return {
+        pr: fullPr,
+        ciStatus: 'unknown',
+        reviewStatus: 'PENDING',
+        isMergeable: false,
+        hasConflicts: false,
+        discussionStatus: 'NONE',
+        latestCommentFingerprint: null,
+        checkRuns: [],
+        failedRuns: [],
+        failedJobs: [],
+        isLoading: false, // Don't show loader for background sync
+        isMerging: false,
+        unseenDiscussions: false,
+        unseenApproval: false,
+        unseenCiFinish: false,
+      };
+    } catch {
+      return null;
     }
-    return false;
   }
 
   /**
@@ -410,6 +611,10 @@ export class DashboardService {
     // 2. Statuses
     if (a.ciStatus !== b.ciStatus) return false;
     if (a.reviewStatus !== b.reviewStatus) return false;
+    // Requested reviewers drive the reviewer icon — compare the set of logins.
+    const aReviewers = (a.pr.requested_reviewers ?? []).map((r) => r.login).sort().join(',');
+    const bReviewers = (b.pr.requested_reviewers ?? []).map((r) => r.login).sort().join(',');
+    if (aReviewers !== bReviewers) return false;
     if (a.discussionStatus !== b.discussionStatus) return false;
     if (a.isMergeable !== b.isMergeable) return false;
     if (a.hasConflicts !== b.hasConflicts) return false;
@@ -448,34 +653,19 @@ export class DashboardService {
       const [owner, repo] = repoFullName.split('/');
 
       // mergeable_state + requested_reviewers only live on the full PR object (the
-      // search payload omits them) and only change when a new commit moves the head
-      // SHA. So refetch the full PR only on a head change; otherwise reuse the cached
-      // values to avoid an extra request per PR on every sync.
-      const previous = this._prList().find((p) => p.pr.id === item.pr.id);
-      const headChanged = !!previous && previous.pr.head.sha !== item.pr.head.sha;
-
-      const [checkRuns, reviews, discussionStatusData] = await Promise.all([
+      // search payload omits them). They change WITHOUT a head-SHA change — e.g.
+      // GitHub drops a reviewer from requested_reviewers the moment they submit a
+      // review, and mergeable_state flips when the base branch advances. So we must
+      // refetch the full PR every sync; fetching it inside the same Promise.all keeps
+      // it off the critical path (no added latency, just one more parallel request).
+      const [checkRuns, reviews, discussionStatusData, fullPr] = await Promise.all([
         this.ciService.loadCheckRuns(item.pr),
         firstValueFrom(this.api.getReviews(owner, repo, item.pr.number)) as Promise<any[]>,
         firstValueFrom(this.api.getPrDiscussionsStatus(owner, repo, item.pr.number)) as Promise<{
           unresolvedThreads: Array<{ isResolved: boolean; lastCommentAuthor: string }>;
         }>,
+        firstValueFrom(this.api.getPullRequest(owner, repo, item.pr.number)) as Promise<PullRequest>,
       ]);
-
-      let fullPr: PullRequest;
-      if (headChanged) {
-        fullPr = (await firstValueFrom(this.api.getPullRequest(owner, repo, item.pr.number))) as PullRequest;
-      } else if (previous) {
-        // Head unchanged — keep the conflict/reviewer state we already know.
-        fullPr = {
-          ...item.pr,
-          mergeable_state: previous.pr.mergeable_state,
-          requested_reviewers: previous.pr.requested_reviewers ?? [],
-        };
-      } else {
-        // Brand-new PR: syncPullRequests already fetched its full data.
-        fullPr = item.pr;
-      }
 
       const isSelected = this._selectedPrId() === item.pr.id;
 
@@ -658,6 +848,19 @@ export class DashboardService {
       };
       return updated;
     });
+  }
+
+  async cancelPipelineForPr(prId: number): Promise<void> {
+    const index = this._prList().findIndex((p) => p.pr.id === prId);
+    if (index === -1) return;
+
+    const item = this._prList()[index];
+    const allRuns = await this.ciService.loadAllWorkflowRuns(item.pr);
+    const [owner, repo] = [item.pr.base.repo.owner.login, item.pr.base.repo.name];
+
+    for (const run of allRuns) {
+      await this.ciService.cancelWorkflowRun(owner, repo, run.id);
+    }
   }
 
   async rerunFailedJobs(prIndex: number, runId: number, repoFullName: string): Promise<boolean> {
@@ -936,6 +1139,22 @@ export class DashboardService {
     } catch {
       // non-critical
     }
+  }
+
+  /** Stable identity for a PR we already hold: `owner/repo#number`. */
+  private prKey(pr: PullRequest): string {
+    return `${pr.base.repo.full_name}#${pr.number}`;
+  }
+
+  /**
+   * Stable identity for a /search/issues result. We derive it from html_url
+   * because the search payload's `id` is the issue id (≠ pr.id) and its `base`
+   * repo info is absent.
+   */
+  private searchKey(item: PullRequest): string | null {
+    const repo = this.extractRepoFromUrl(item.html_url);
+    const number = this.extractPrNumber(item.html_url);
+    return repo && number ? `${repo}#${number}` : null;
   }
 
   private extractRepoFromUrl(url: string): string | null {

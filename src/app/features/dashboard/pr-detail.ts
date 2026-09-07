@@ -148,6 +148,43 @@ interface ReviewThread {
           <div class="flex flex-col items-end gap-2 shrink-0">
             <gt-ci-badge [status]="pr().ciStatus" />
             <div class="flex items-center gap-1.5">
+              <!-- Mark ready for review -->
+              @if (pr().pr.draft) {
+                <button
+                  (click)="markReadyForReview()"
+                  [disabled]="isMarkingReady()"
+                  class="px-3 py-1.5 text-[11px] font-bold bg-accent text-white rounded-lg hover:bg-accent/90 transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 shadow-lg shadow-accent/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  @if (isMarkingReady()) {
+                    <svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle
+                        class="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        stroke-width="4"
+                      ></circle>
+                      <path
+                        class="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                      ></path>
+                    </svg>
+                    Marking ready…
+                  } @else {
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M5 13l4 4L19 7"
+                      />
+                    </svg>
+                    Ready for review
+                  }
+                </button>
+              }
               <!-- Merge button -->
               @if (pr().isMergeable) {
                 <button
@@ -849,7 +886,11 @@ interface ReviewThread {
           </div>
         } @else if (activeTab() === 'coverage') {
           <!-- Coverage tab -->
-          <gt-coverage-report [pr]="pr().pr" [active]="activeTab() === 'coverage'" />
+          <gt-coverage-report
+            [pr]="pr().pr"
+            [active]="activeTab() === 'coverage'"
+            [refreshKey]="coverageRefreshKey()"
+          />
         } @else {
           @if (pr().isLoading && pr().checkRuns.length === 0) {
             <!-- Loading state -->
@@ -1022,24 +1063,20 @@ interface ReviewThread {
                 </div>
                 <div class="flex items-center gap-2">
                   <button
-                    (click)="rerunAllFailed.emit()"
-                    [disabled]="!isCiComplete()"
-                    [title]="rerunTooltip()"
-                    class="px-3 py-1.5 text-xs font-medium bg-gradient-to-r from-amber-500 to-orange-600 text-white
-                         rounded-lg hover:from-amber-600 hover:to-orange-700 active:scale-95
-                         transition-all shadow-lg shadow-amber-500/20 cursor-pointer flex items-center gap-1.5
-                         disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:from-amber-500
-                         disabled:hover:to-orange-600 disabled:active:scale-100"
+                    (click)="cancelPipeline.emit()"
+                    class="px-3 py-1.5 text-xs font-medium bg-gradient-to-r from-red-500 to-rose-600 text-white
+                         rounded-lg hover:from-red-600 hover:to-rose-700 active:scale-95
+                         transition-all shadow-lg shadow-red-500/20 cursor-pointer flex items-center gap-1.5"
                   >
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path
                         stroke-linecap="round"
                         stroke-linejoin="round"
                         stroke-width="2"
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                        d="M6 18L18 6M6 6l12 12"
                       />
                     </svg>
-                    Rerun All Failed
+                    Cancel Pipeline
                   </button>
                   <button
                     (click)="rerunAllCi.emit()"
@@ -1427,6 +1464,70 @@ interface ReviewThread {
                 </div>
               }
             </div>
+          } @else if (pr().ciStatus === 'action_required') {
+            <!-- Action required (e.g. Argos visual review awaiting approval) -->
+            <div class="p-6">
+              <div class="text-center py-10">
+                <div
+                  class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-warning-bg border border-warning-border mb-4"
+                >
+                  <svg class="w-8 h-8 text-warning" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
+                    <path
+                      fill-rule="evenodd"
+                      d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z"
+                      clip-rule="evenodd"
+                    />
+                  </svg>
+                </div>
+                <h3 class="text-lg font-semibold text-warning mb-1">Action required</h3>
+                <p class="text-sm text-text-muted">
+                  All other checks passed, but one or more checks need manual approval.
+                </p>
+              </div>
+
+              <!-- List all check runs, highlighting the ones needing action -->
+              <div class="space-y-2 mt-4">
+                @for (check of pr().checkRuns; track check.id) {
+                  <div
+                    class="flex items-center gap-3 px-4 py-2.5 bg-bg-glass border rounded-lg"
+                    [class.border-warning-border]="check.conclusion === 'action_required'"
+                    [class.border-border-glass]="check.conclusion !== 'action_required'"
+                  >
+                    @if (check.conclusion === 'action_required') {
+                      <svg class="w-4 h-4 text-warning shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
+                        <path
+                          fill-rule="evenodd"
+                          d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z"
+                          clip-rule="evenodd"
+                        />
+                      </svg>
+                    } @else if (check.conclusion === 'failure') {
+                      <svg class="w-4 h-4 text-danger shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                        <path
+                          fill-rule="evenodd"
+                          d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+                          clip-rule="evenodd"
+                        />
+                      </svg>
+                    } @else {
+                      <svg class="w-4 h-4 text-success shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                        <path
+                          fill-rule="evenodd"
+                          d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                          clip-rule="evenodd"
+                        />
+                      </svg>
+                    }
+                    <span class="text-sm text-text-primary">{{ check.name }}</span>
+                    @if (check.conclusion === 'action_required') {
+                      <span class="text-xs text-warning ml-auto">Action required</span>
+                    }
+                  </div>
+                }
+              </div>
+            </div>
           } @else {
             <!-- Unknown / no checks -->
             <div class="p-6 text-center py-12">
@@ -1462,14 +1563,18 @@ export class PrDetailComponent {
   readonly merge = output<void>();
   readonly rerunAllFailed = output<void>();
   readonly rerunAllCi = output<void>();
+  readonly cancelPipeline = output<void>();
   readonly copyLink = output<string>();
   readonly rerunJob = output<{ runId: number; repoFullName: string }>();
   readonly prDetailsUpdated = output<{ title: string; body: string }>();
+  readonly addReviewersRequested = output<void>();
+  readonly markReadyRequested = output<void>();
 
   readonly copied = signal(false);
   readonly slackCopied = signal(false);
   readonly reviewersAdded = signal(false);
   readonly isAddingReviewers = signal(false);
+  readonly isMarkingReady = signal(false);
   readonly activeTab = signal<'ci' | 'conversations' | 'coverage' | 'details'>('ci');
 
   // Conversations state
@@ -1527,6 +1632,18 @@ export class PrDetailComponent {
   readonly nxCloudUrl = computed(() => {
     return this.pr().failedJobs.find(j => !!j.nxCloudUrl)?.nxCloudUrl;
   });
+
+  /**
+   * Changes whenever the CI checks change (a run completes or is re-run), which
+   * is exactly when a fresh coverage artifact can appear for the same commit.
+   * Feeding it to the coverage tab makes the report reload on those changes
+   * instead of staying stuck on the first version it loaded.
+   */
+  readonly coverageRefreshKey = computed(() =>
+    this.pr()
+      .checkRuns.map((c) => `${c.id}:${c.status}:${c.conclusion ?? ''}`)
+      .join('|'),
+  );
 
   readonly hasStandardReviewers = computed(() => {
     const reviewers = this.pr().pr.requested_reviewers || [];
@@ -1790,23 +1907,22 @@ export class PrDetailComponent {
     });
   }
 
-  async addReviewers(): Promise<void> {
-    const { base, number } = this.pr().pr;
-    const owner = base.repo.owner.login;
-    const repo = base.repo.name;
-    const reviewers = ['Betrozov', 'Mathieu-JJ', 'MaximeSohetRosa'];
+  markReadyForReview(): void {
+    // Same fire-and-forget pattern as addReviewers(): the dashboard service
+    // owns the optimistic update, so the button just disappears once
+    // pr().pr.draft flips to false.
+    this.isMarkingReady.set(true);
+    this.markReadyRequested.emit();
+    setTimeout(() => this.isMarkingReady.set(false), 2000);
+  }
 
-    this.isAddingReviewers.set(true);
-    try {
-      await firstValueFrom(this.api.requestReviewers(owner, repo, number, reviewers));
-      this.reviewersAdded.set(true);
-      setTimeout(() => this.reviewersAdded.set(false), 2000);
-      this.reload.emit();
-    } catch (error) {
-      console.error('Failed to add reviewers', error);
-    } finally {
-      this.isAddingReviewers.set(false);
-    }
+  addReviewers(): void {
+    // The dashboard service handles the request optimistically (it updates the
+    // card immediately and shields it from in-flight syncs), so we only fire the
+    // intent and show the local confirmation tick — no reload, no flicker.
+    this.reviewersAdded.set(true);
+    setTimeout(() => this.reviewersAdded.set(false), 2000);
+    this.addReviewersRequested.emit();
   }
 
   groupBySuite(

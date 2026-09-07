@@ -73,11 +73,15 @@ import { CiBadgeComponent } from '../ci-status/ci-badge';
                 </div>
               }
 
-              <!-- Requested Reviewers Icon (awaiting review) -->
+              <!-- Reviewer Request Icon (is a review request out?) -->
               @if (prData().pr.requested_reviewers.length) {
                 <div
-                  [title]="prData().pr.requested_reviewers.length + ' reviewer(s) awaiting review'"
-                  class="flex-shrink-0 flex items-center gap-0.5 text-warning"
+                  [title]="
+                    'Review requested · ' +
+                    prData().pr.requested_reviewers.length +
+                    ' awaiting'
+                  "
+                  class="flex-shrink-0 flex items-center gap-0.5 text-success"
                 >
                   <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                     <path
@@ -87,6 +91,50 @@ import { CiBadgeComponent } from '../ci-status/ci-badge';
                     />
                   </svg>
                   <span class="text-[10px] font-bold">{{ prData().pr.requested_reviewers.length }}</span>
+                </div>
+              } @else if (prData().reviewStatus !== 'APPROVED') {
+                <div title="Re-request review needed" class="text-warning flex-shrink-0">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                    />
+                  </svg>
+                </div>
+              }
+
+              <!-- Approval Status Icon (is the PR approved?) -->
+              @if (prData().reviewStatus === 'APPROVED') {
+                <div title="Approved" class="text-success flex-shrink-0">
+                  <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <path
+                      fill-rule="evenodd"
+                      d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                      clip-rule="evenodd"
+                    />
+                  </svg>
+                </div>
+              } @else if (prData().reviewStatus === 'CHANGES_REQUESTED') {
+                <div title="Changes requested" class="text-danger flex-shrink-0">
+                  <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <path
+                      fill-rule="evenodd"
+                      d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                      clip-rule="evenodd"
+                    />
+                  </svg>
+                </div>
+              } @else {
+                <div title="Pending review" class="text-warning flex-shrink-0">
+                  <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <path
+                      fill-rule="evenodd"
+                      d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z"
+                      clip-rule="evenodd"
+                    />
+                  </svg>
                 </div>
               }
 
@@ -107,49 +155,6 @@ import { CiBadgeComponent } from '../ci-status/ci-badge';
                     <path
                       fill-rule="evenodd"
                       d="M18 10c0 3.866-3.582 7-8 7a8.841 8.841 0 01-4.083-.98L2 17l1.338-3.123C2.493 12.767 2 11.434 2 10c0-3.866 3.582-7 8-7s8 3.134 8 7zM7 9H5v2h2V9zm8 0h-2v2h2V9zm-4 0H9v2h2V9z"
-                      clip-rule="evenodd"
-                    />
-                  </svg>
-                </div>
-              }
-
-              <!-- Review Status Icon -->
-              @if (prData().reviewStatus === 'APPROVED') {
-                <div title="Approved" class="text-success flex-shrink-0">
-                  <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                    <path
-                      fill-rule="evenodd"
-                      d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                      clip-rule="evenodd"
-                    />
-                  </svg>
-                </div>
-              } @else if (prData().reviewStatus === 'CHANGES_REQUESTED') {
-                <div title="Changes Requested" class="text-danger flex-shrink-0">
-                  <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                    <path
-                      fill-rule="evenodd"
-                      d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
-                      clip-rule="evenodd"
-                    />
-                  </svg>
-                </div>
-              } @else if (prData().reviewStatus === 'PENDING') {
-                <div title="Pending Review" class="text-warning flex-shrink-0">
-                  <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                    <path
-                      fill-rule="evenodd"
-                      d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z"
-                      clip-rule="evenodd"
-                    />
-                  </svg>
-                </div>
-              } @else if (prData().reviewStatus === 'DISMISSED') {
-                <div title="Review Dismissed" class="text-text-muted flex-shrink-0">
-                  <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                    <path
-                      fill-rule="evenodd"
-                      d="M10 18a8 8 0 100-16 8 8 0 000 16zM7 9a1 1 0 000 2h6a1 1 0 100-2H7z"
                       clip-rule="evenodd"
                     />
                   </svg>

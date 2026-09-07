@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
-import { Observable, map } from 'rxjs';
+import { Observable, map, switchMap } from 'rxjs';
 import {
   GitHubUser,
   PullRequest,
@@ -150,6 +150,16 @@ export class GitHubApiService {
   rerunWorkflow(owner: string, repo: string, runId: number): Observable<void> {
     return this.http.post<void>(
       `${API_BASE}/repos/${owner}/${repo}/actions/runs/${runId}/rerun`,
+      {},
+    );
+  }
+
+  /**
+   * Cancel a workflow run.
+   */
+  cancelWorkflowRun(owner: string, repo: string, runId: number): Observable<void> {
+    return this.http.post<void>(
+      `${API_BASE}/repos/${owner}/${repo}/actions/runs/${runId}/cancel`,
       {},
     );
   }
@@ -333,6 +343,67 @@ export class GitHubApiService {
   }
 
   /**
+   * Mark a draft pull request as ready for review.
+   *
+   * REST has no endpoint for this — it's only exposed via the GraphQL
+   * `markPullRequestReadyForReview` mutation, so we resolve the PR node id
+   * first and then run the mutation, same two-step shape as `requestReviewers`.
+   */
+  markPullRequestReadyForReview(
+    owner: string,
+    repo: string,
+    prNumber: number,
+  ): Observable<void> {
+    const lookup = `
+      query($owner: String!, $repo: String!, $number: Int!) {
+        repository(owner: $owner, name: $repo) {
+          pullRequest(number: $number) { id }
+        }
+      }
+    `;
+
+    return this.http
+      .post<any>(`${API_BASE}/graphql`, {
+        query: lookup,
+        variables: { owner, repo, number: prNumber },
+      })
+      .pipe(
+        switchMap((res) => {
+          if (res?.errors?.length) {
+            throw new Error(res.errors[0]?.message || 'Failed to resolve pull request.');
+          }
+          const pullRequestId = res?.data?.repository?.pullRequest?.id;
+          if (!pullRequestId) {
+            throw new Error('Could not resolve pull request.');
+          }
+
+          const mutation = `
+            mutation($pullRequestId: ID!) {
+              markPullRequestReadyForReview(input: { pullRequestId: $pullRequestId }) {
+                pullRequest { id }
+              }
+            }
+          `;
+          return this.http
+            .post<any>(`${API_BASE}/graphql`, {
+              query: mutation,
+              variables: { pullRequestId },
+            })
+            .pipe(
+              map((mutationRes) => {
+                if (mutationRes?.errors?.length) {
+                  throw new Error(
+                    mutationRes.errors[0]?.message || 'Failed to mark pull request ready for review.',
+                  );
+                }
+                return undefined;
+              }),
+            );
+        }),
+      );
+  }
+
+  /**
    * Update a pull request's title and/or body.
    */
   updatePullRequest(
@@ -349,7 +420,14 @@ export class GitHubApiService {
   }
 
   /**
-   * Request reviewers for a pull request.
+   * Request (or re-request) reviews from the given users on a pull request.
+   *
+   * Uses the GraphQL `requestReviews` mutation rather than the REST
+   * `requested_reviewers` endpoint: REST silently ignores users who have
+   * already submitted a review, so it can't re-request a review from an
+   * "old" reviewer after new commits. GraphQL with `union: true` re-requests
+   * those reviewers (the same behaviour as the "re-request review" sync icon
+   * in the GitHub web UI) while keeping any reviewers already requested.
    */
   requestReviewers(
     owner: string,
@@ -357,10 +435,64 @@ export class GitHubApiService {
     prNumber: number,
     reviewers: string[],
   ): Observable<void> {
-    return this.http.post<void>(
-      `${API_BASE}/repos/${owner}/${repo}/pulls/${prNumber}/requested_reviewers`,
-      { reviewers },
-    );
+    // Resolve the PR node id and each reviewer's user node id in one query.
+    const userAliases = reviewers
+      .map((login, i) => `u${i}: user(login: ${JSON.stringify(login)}) { id }`)
+      .join('\n');
+    const lookup = `
+      query($owner: String!, $repo: String!, $number: Int!) {
+        repository(owner: $owner, name: $repo) {
+          pullRequest(number: $number) { id }
+        }
+        ${userAliases}
+      }
+    `;
+
+    return this.http
+      .post<any>(`${API_BASE}/graphql`, {
+        query: lookup,
+        variables: { owner, repo, number: prNumber },
+      })
+      .pipe(
+        switchMap((res) => {
+          if (res?.errors?.length) {
+            throw new Error(res.errors[0]?.message || 'Failed to resolve reviewers.');
+          }
+          const pullRequestId = res?.data?.repository?.pullRequest?.id;
+          if (!pullRequestId) {
+            throw new Error('Could not resolve pull request.');
+          }
+          const userIds = reviewers
+            .map((_, i) => res?.data?.[`u${i}`]?.id)
+            .filter((id): id is string => Boolean(id));
+          if (userIds.length === 0) {
+            throw new Error('Could not resolve any reviewers.');
+          }
+
+          const mutation = `
+            mutation($pullRequestId: ID!, $userIds: [ID!]) {
+              requestReviews(input: { pullRequestId: $pullRequestId, userIds: $userIds, union: true }) {
+                pullRequest { id }
+              }
+            }
+          `;
+          return this.http
+            .post<any>(`${API_BASE}/graphql`, {
+              query: mutation,
+              variables: { pullRequestId, userIds },
+            })
+            .pipe(
+              map((mutationRes) => {
+                if (mutationRes?.errors?.length) {
+                  throw new Error(
+                    mutationRes.errors[0]?.message || 'Failed to request reviewers.',
+                  );
+                }
+                return undefined;
+              }),
+            );
+        }),
+      );
   }
 
   /**

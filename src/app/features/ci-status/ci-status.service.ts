@@ -29,9 +29,13 @@ export class CiStatusService {
     const hasPending = checkRuns.some(
       cr => cr.status === 'in_progress' || cr.status === 'queued',
     );
+    // e.g. Argos visual checks sit in `action_required` until diffs are
+    // approved. Surface that explicitly instead of hiding it as 'neutral'.
+    const hasActionRequired = checkRuns.some(cr => cr.conclusion === 'action_required');
 
     if (hasFailure) return 'failure';
     if (hasPending) return 'pending';
+    if (hasActionRequired) return 'action_required';
 
     const allSuccess = checkRuns.every(
       cr => cr.conclusion === 'success' || cr.conclusion === 'skipped' || cr.conclusion === 'neutral',
@@ -133,6 +137,18 @@ export class CiStatusService {
   async rerunWorkflow(owner: string, repo: string, runId: number): Promise<boolean> {
     try {
       await firstValueFrom(this.api.rerunWorkflow(owner, repo, runId)) as any;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Cancel a workflow run.
+   */
+  async cancelWorkflowRun(owner: string, repo: string, runId: number): Promise<boolean> {
+    try {
+      await firstValueFrom(this.api.cancelWorkflowRun(owner, repo, runId)) as any;
       return true;
     } catch {
       return false;
